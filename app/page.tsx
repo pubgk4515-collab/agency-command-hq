@@ -6,15 +6,18 @@ import { toggleStoreFeature } from './actions/agencyActions';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShieldAlert, Store, Zap, Search, Loader2, 
-  Receipt, MessageCircle, Radar, TrendingUp, BarChart3, Users, X
+  Receipt, MessageCircle, Radar, TrendingUp, Bell, AlertTriangle, Check, X
 } from 'lucide-react';
 
 export default function SuperAdminDashboard() {
   const [stores, setStores] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]); // 🔥 AI Alerts State
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStore, setSelectedStore] = useState<any | null>(null); // For the VIP Drawer
+  
+  const [selectedStore, setSelectedStore] = useState<any | null>(null);
+  const [isAlertDrawerOpen, setIsAlertDrawerOpen] = useState(false); // 🔥 Alert Drawer State
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,19 +26,14 @@ export default function SuperAdminDashboard() {
 
   const fetchNetworkData = async () => {
     try {
-      // Fetch all stores
-      const { data: storesData } = await supabase
-        .from('stores')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
-      // Fetch all sales for network volume
-      const { data: salesData } = await supabase
-        .from('sales')
-        .select('total_amount');
+      const { data: storesData } = await supabase.from('stores').select('*').order('created_at', { ascending: false });
+      const { data: salesData } = await supabase.from('sales').select('total_amount');
+      // 🔥 Fetch Pending Alerts
+      const { data: alertsData } = await supabase.from('system_alerts').select('*').eq('status', 'pending').order('created_at', { ascending: false });
 
       if (storesData) setStores(storesData);
       if (salesData) setSales(salesData);
+      if (alertsData) setAlerts(alertsData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -48,7 +46,6 @@ export default function SuperAdminDashboard() {
     try {
       const result = await toggleStoreFeature(storeId, featureColumn, !currentValue);
       if (result.success) {
-        // Update local state for immediate UI reaction
         setStores(stores.map(s => s.id === storeId ? { ...s, [featureColumn]: !currentValue } : s));
         if (selectedStore?.id === storeId) {
           setSelectedStore({ ...selectedStore, [featureColumn]: !currentValue });
@@ -61,9 +58,23 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  // Analytics Math
+  // 🔥 Handle AI Alert Actions (Approve/Reject)
+  const handleAlertAction = async (alertId: string, action: 'approved' | 'rejected') => {
+    setUpdatingId(`alert-${alertId}`);
+    try {
+      await supabase.from('system_alerts').update({ status: action }).eq('id', alertId);
+      // Remove from UI instantly
+      setAlerts(alerts.filter(a => a.id !== alertId));
+      if (alerts.length === 1) setIsAlertDrawerOpen(false); // Close if it was the last alert
+    } catch (err) {
+      console.error("Failed to update alert", err);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const totalVolume = sales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
-  const totalTransactions = sales.length; // Acting as 'Scans/Orders' for now
+  const totalTransactions = sales.length;
 
   const filteredStores = stores.filter(store => 
     store.store_name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -75,7 +86,7 @@ export default function SuperAdminDashboard() {
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans overflow-x-hidden selection:bg-emerald-500/30">
       
-      {/* 👑 HEADER */}
+      {/* 👑 HEADER with AI Alert Bell */}
       <header className="bg-[#0A0A0A]/90 backdrop-blur-xl border-b border-white/5 sticky top-0 z-30 px-6 py-5">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -87,120 +98,127 @@ export default function SuperAdminDashboard() {
               <p className="text-[9px] uppercase tracking-widest font-bold mt-1 text-emerald-500">Live Network</p>
             </div>
           </div>
+
+          {/* AI Alert Bell Button */}
+          <button 
+            onClick={() => alerts.length > 0 && setIsAlertDrawerOpen(true)}
+            className="relative p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all flex items-center justify-center"
+          >
+            <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-rose-400 animate-pulse' : 'text-zinc-500'}`} />
+            {alerts.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-[#0A0A0A] text-[8px] font-black items-center justify-center text-white">
+                  {alerts.length}
+                </span>
+              </span>
+            )}
+          </button>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
-        
-        {/* 📊 GOD'S EYE ANALYTICS (Top 3 Metrics) */}
+        {/* Analytics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-          <StatCard 
-            icon={<Store className="w-5 h-5 text-blue-400" />}
-            title="Active Tenants"
-            value={`${stores.length} / 2000`}
-            subtitle="Target for 2026"
-            glowColor="rgba(96,165,250,0.1)"
-          />
-          <StatCard 
-            icon={<TrendingUp className="w-5 h-5 text-emerald-400" />}
-            title="Network Volume (All Time)"
-            value={`₹${totalVolume.toLocaleString('en-IN')}`}
-            subtitle="Total value processed"
-            glowColor="rgba(16,185,129,0.1)"
-          />
-          <StatCard 
-            icon={<Radar className="w-5 h-5 text-purple-400" />}
-            title="Global Magic Scans"
-            value={totalTransactions.toLocaleString('en-IN')}
-            subtitle="Successful checkouts"
-            glowColor="rgba(192,132,252,0.1)"
-          />
+          <StatCard icon={<Store className="w-5 h-5 text-blue-400" />} title="Active Tenants" value={`${stores.length} / 2000`} subtitle="Target for 2026" glowColor="rgba(96,165,250,0.1)" />
+          <StatCard icon={<TrendingUp className="w-5 h-5 text-emerald-400" />} title="Network Volume" value={`₹${totalVolume.toLocaleString('en-IN')}`} subtitle="Total value processed" glowColor="rgba(16,185,129,0.1)" />
+          <StatCard icon={<Radar className="w-5 h-5 text-purple-400" />} title="Global Scans" value={totalTransactions.toLocaleString('en-IN')} subtitle="Successful checkouts" glowColor="rgba(192,132,252,0.1)" />
         </div>
 
-        {/* 🏢 STORE DIRECTORY */}
+        {/* Store Directory */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <h2 className="text-lg font-black tracking-tight">Tenant Directory</h2>
           <div className="relative w-full sm:w-72">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-            <input 
-              type="text" 
-              placeholder="Search 2000+ stores..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#111] border border-white/10 rounded-xl py-2.5 pl-11 pr-4 text-sm font-bold focus:outline-none focus:border-white/30 text-white placeholder:text-zinc-600 transition-colors" 
-            />
+            <input type="text" placeholder="Search 2000+ stores..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-[#111] border border-white/10 rounded-xl py-2.5 pl-11 pr-4 text-sm font-bold focus:outline-none focus:border-white/30 transition-colors" />
           </div>
         </div>
 
-        {/* LEADERBOARD LIST */}
         <div className="bg-[#0A0A0A] border border-white/5 rounded-[2rem] overflow-hidden">
           {filteredStores.map((store, index) => (
-            <div key={store.id} className="flex items-center justify-between p-5 border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
+            <div key={store.id} className="flex items-center justify-between p-5 border-b border-white/5 hover:bg-white/[0.02] transition-colors">
               <div className="flex items-center gap-4">
-                <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-xs font-black text-zinc-500 border border-white/5">
-                  #{index + 1}
-                </div>
+                <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-xs font-black text-zinc-500 border border-white/5">#{index + 1}</div>
                 <div>
                   <h3 className="text-sm font-black text-white">{store.store_name || 'Unnamed Store'}</h3>
                   <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">/{store.slug}</p>
                 </div>
               </div>
-              
-              <button 
-                onClick={() => setSelectedStore(store)}
-                className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest py-2 px-4 rounded-full transition-all flex items-center gap-2"
-              >
-                <Zap className="w-3 h-3 text-emerald-400" /> VIP Controls
-              </button>
+              <button onClick={() => setSelectedStore(store)} className="bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest py-2 px-4 rounded-full transition-all flex gap-2"><Zap className="w-3 h-3 text-emerald-400" /> VIP Controls</button>
             </div>
           ))}
         </div>
       </main>
 
-      {/* 🚀 THE APPLE-STYLE SLIDE DRAWER */}
+      {/* 🚀 THE VIP CONTROLS DRAWER */}
       <AnimatePresence>
         {selectedStore && (
           <>
-            {/* Blur Backdrop */}
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setSelectedStore(null)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
-            />
-            
-            {/* Drawer Panel */}
-            <motion.div 
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 h-full w-full sm:w-[400px] bg-[#0A0A0A] border-l border-white/10 z-50 p-6 shadow-2xl overflow-y-auto"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedStore(null)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
+            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed top-0 right-0 h-full w-full sm:w-[400px] bg-[#0A0A0A] border-l border-white/10 z-50 p-6 shadow-2xl overflow-y-auto">
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h2 className="text-xl font-black">{selectedStore.store_name}</h2>
                   <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Tenant ID: {selectedStore.id.substring(0,8)}</p>
                 </div>
-                <button onClick={() => setSelectedStore(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors">
-                  <X className="w-5 h-5" />
-                </button>
+                <button onClick={() => setSelectedStore(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="flex flex-col gap-3">
+                <FeatureToggle icon={<Receipt className="w-4 h-4" />} title="Inclusive GST Engine" isActive={selectedStore.has_gst} isLoading={updatingId === `${selectedStore.id}-has_gst`} onToggle={() => handleToggle(selectedStore.id, 'has_gst', selectedStore.has_gst)} themeColor={selectedStore.theme_color} />
+                <FeatureToggle icon={<Radar className="w-4 h-4" />} title="Virtual CCTV (Radar)" isActive={selectedStore.has_live_radar} isLoading={updatingId === `${selectedStore.id}-has_live_radar`} onToggle={() => handleToggle(selectedStore.id, 'has_live_radar', selectedStore.has_live_radar)} themeColor={selectedStore.theme_color} />
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ⚠️ AI SYSTEM ALERTS DRAWER */}
+      <AnimatePresence>
+        {isAlertDrawerOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAlertDrawerOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-md z-40" />
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto h-[70vh] bg-[#0A0A0A] border-t border-x border-white/10 rounded-t-[2rem] z-50 p-6 shadow-2xl overflow-y-auto">
+              
+              <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5 text-rose-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-white leading-none">System Alerts</h2>
+                    <p className="text-[10px] uppercase tracking-widest font-bold mt-1 text-rose-500">Requires CTO Approval</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsAlertDrawerOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
               </div>
 
-              <div className="flex flex-col gap-3">
-                <FeatureToggle 
-                  icon={<Receipt className="w-4 h-4" />} title="Inclusive GST Engine" 
-                  isActive={selectedStore.has_gst} isLoading={updatingId === `${selectedStore.id}-has_gst`}
-                  onToggle={() => handleToggle(selectedStore.id, 'has_gst', selectedStore.has_gst)} themeColor={selectedStore.theme_color}
-                />
-                <FeatureToggle 
-                  icon={<Radar className="w-4 h-4" />} title="Virtual CCTV (Radar)" 
-                  isActive={selectedStore.has_live_radar} isLoading={updatingId === `${selectedStore.id}-has_live_radar`}
-                  onToggle={() => handleToggle(selectedStore.id, 'has_live_radar', selectedStore.has_live_radar)} themeColor={selectedStore.theme_color}
-                />
-                <FeatureToggle 
-                  icon={<MessageCircle className="w-4 h-4" />} title="WhatsApp CRM" 
-                  isActive={selectedStore.has_whatsapp_crm} isLoading={updatingId === `${selectedStore.id}-has_whatsapp_crm`}
-                  onToggle={() => handleToggle(selectedStore.id, 'has_whatsapp_crm', selectedStore.has_whatsapp_crm)} themeColor={selectedStore.theme_color}
-                />
+              <div className="flex flex-col gap-4">
+                {alerts.map((alert) => (
+                  <div key={alert.id} className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 blur-[40px]" />
+                    <h3 className="text-base font-black text-white relative z-10">{alert.title}</h3>
+                    <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">{alert.description}</p>
+                    
+                    <div className="flex items-center gap-3 mt-6 relative z-10">
+                      <button 
+                        onClick={() => handleAlertAction(alert.id, 'approved')}
+                        disabled={updatingId === `alert-${alert.id}`}
+                        className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                      >
+                        {updatingId === `alert-${alert.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Approve & Deploy</>}
+                      </button>
+                      <button 
+                        onClick={() => handleAlertAction(alert.id, 'rejected')}
+                        disabled={updatingId === `alert-${alert.id}`}
+                        className="flex-1 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
+
             </motion.div>
           </>
         )}
@@ -213,13 +231,12 @@ export default function SuperAdminDashboard() {
 // Sub-components
 function StatCard({ icon, title, value, subtitle, glowColor }: any) {
   return (
-    <div className="bg-[#0A0A0A] border border-white/5 p-6 rounded-[2rem] relative overflow-hidden group hover:border-white/10 transition-colors">
+    <div className="bg-[#0A0A0A] border border-white/5 p-6 rounded-[2rem] relative overflow-hidden group">
       <div className="absolute top-0 right-0 w-32 h-32 blur-[50px] transition-all group-hover:scale-150" style={{ backgroundColor: glowColor }} />
       <div className="relative z-10">
         <div className="w-10 h-10 bg-[#111] rounded-xl flex items-center justify-center border border-white/5 mb-4">{icon}</div>
         <p className="text-3xl font-black tracking-tighter text-white">{value}</p>
         <p className="text-xs font-bold text-zinc-300 mt-1">{title}</p>
-        <p className="text-[10px] uppercase tracking-widest font-black text-zinc-600 mt-3">{subtitle}</p>
       </div>
     </div>
   );
