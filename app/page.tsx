@@ -22,13 +22,29 @@ export default function SuperAdminDashboard() {
 
   useEffect(() => {
     fetchNetworkData();
+
+    // 🚀 FUTURE-PROOFING: Real-time WebSocket Listener for AI Alerts
+    const alertSubscription = supabase
+      .channel('system-alerts-channel')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_alerts' }, payload => {
+        if (payload.new.status === 'pending') {
+          // Naya alert aate hi instantly state me add karo (No refresh needed!)
+          setAlerts(currentAlerts => [payload.new, ...currentAlerts]);
+        }
+      })
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(alertSubscription);
+    };
   }, []);
 
   const fetchNetworkData = async () => {
     try {
       const { data: storesData } = await supabase.from('stores').select('*').order('created_at', { ascending: false });
       const { data: salesData } = await supabase.from('sales').select('total_amount');
-      // 🔥 Fetch Pending Alerts
+      // Fetch Pending Alerts
       const { data: alertsData } = await supabase.from('system_alerts').select('*').eq('status', 'pending').order('created_at', { ascending: false });
 
       if (storesData) setStores(storesData);
@@ -63,9 +79,9 @@ export default function SuperAdminDashboard() {
     setUpdatingId(`alert-${alertId}`);
     try {
       await supabase.from('system_alerts').update({ status: action }).eq('id', alertId);
-      // Remove from UI instantly
+      // Remove from UI instantly with animation support
       setAlerts(alerts.filter(a => a.id !== alertId));
-      if (alerts.length === 1) setIsAlertDrawerOpen(false); // Close if it was the last alert
+      // We do NOT auto-close the drawer anymore, so the user can see the "System Healthy" success state.
     } catch (err) {
       console.error("Failed to update alert", err);
     } finally {
@@ -99,9 +115,9 @@ export default function SuperAdminDashboard() {
             </div>
           </div>
 
-          {/* AI Alert Bell Button */}
+          {/* AI Alert Bell Button (Always clickable now) */}
           <button 
-            onClick={() => alerts.length > 0 && setIsAlertDrawerOpen(true)}
+            onClick={() => setIsAlertDrawerOpen(true)}
             className="relative p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all flex items-center justify-center"
           >
             <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-rose-400 animate-pulse' : 'text-zinc-500'}`} />
@@ -192,31 +208,52 @@ export default function SuperAdminDashboard() {
                 <button onClick={() => setIsAlertDrawerOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
               </div>
 
+              {/* 🔥 FUTURE PROOF: Premium Empty State UI */}
               <div className="flex flex-col gap-4">
-                {alerts.map((alert) => (
-                  <div key={alert.id} className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 blur-[40px]" />
-                    <h3 className="text-base font-black text-white relative z-10">{alert.title}</h3>
-                    <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">{alert.description}</p>
-                    
-                    <div className="flex items-center gap-3 mt-6 relative z-10">
-                      <button 
-                        onClick={() => handleAlertAction(alert.id, 'approved')}
-                        disabled={updatingId === `alert-${alert.id}`}
-                        className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                {alerts.length === 0 ? (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex flex-col items-center justify-center py-16 text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-white/[0.01]"
+                  >
+                    <ShieldAlert className="w-12 h-12 mb-4 opacity-20 text-emerald-500" />
+                    <p className="text-sm font-black uppercase tracking-widest text-zinc-300">System is Healthy</p>
+                    <p className="text-xs mt-2 opacity-50 font-medium">No pending AI alerts or anomalies detected.</p>
+                  </motion.div>
+                ) : (
+                  <AnimatePresence>
+                    {alerts.map((alert) => (
+                      <motion.div 
+                        key={alert.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, x: -50 }}
+                        className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group"
                       >
-                        {updatingId === `alert-${alert.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Approve & Deploy</>}
-                      </button>
-                      <button 
-                        onClick={() => handleAlertAction(alert.id, 'rejected')}
-                        disabled={updatingId === `alert-${alert.id}`}
-                        className="flex-1 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 blur-[40px]" />
+                        <h3 className="text-base font-black text-white relative z-10">{alert.title}</h3>
+                        <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">{alert.description}</p>
+                        
+                        <div className="flex items-center gap-3 mt-6 relative z-10">
+                          <button 
+                            onClick={() => handleAlertAction(alert.id, 'approved')}
+                            disabled={updatingId === `alert-${alert.id}`}
+                            className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                          >
+                            {updatingId === `alert-${alert.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Approve & Deploy</>}
+                          </button>
+                          <button 
+                            onClick={() => handleAlertAction(alert.id, 'rejected')}
+                            disabled={updatingId === `alert-${alert.id}`}
+                            className="flex-1 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                )}
               </div>
 
             </motion.div>
