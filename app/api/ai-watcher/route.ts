@@ -1,88 +1,155 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabase'; 
 
+// 🔥 THE SYSTEM ARCHITECT CONFIGURATION
+const AI_MODEL = 'gpt-4o-mini'; 
+const BATCH_SIZE = 100; // Ek baar me kitne products scan karega
+
 export async function GET(request: Request) {
-  // 🔒 1. Security Lock: Taki koi bahar wala is API ko hit na kar sake (Sirf Vercel Cron karega)
+  console.log("🤖 [AI WATCHER] Waking up for routine patrol...");
+
+  // 🔒 1. ENTERPRISE SECURITY LOCK
   const authHeader = request.headers.get('authorization');
-  if (process.env.NODE_ENV === 'production' && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return new NextResponse('Unauthorized access', { status: 401 });
+  if (process.env.NODE_ENV === 'production') {
+    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+      console.warn("⚠️ [AI WATCHER] Unauthorized access attempt blocked.");
+      return new NextResponse('Unauthorized', { status: 401 });
+    }
   }
 
   try {
-    // 🕵️ 2. The Data Fetch: Agent check karega ki kis product pe default category lagi hai
-    const { data: products, error } = await supabase
+    // 🕵️ 2. FETCHING VULNERABLE DATA (Hunting for anomalies)
+    console.log(`🔍 [AI WATCHER] Scanning up to ${BATCH_SIZE} items categorized as 'Normal Apparel'...`);
+    
+    const { data: products, error: fetchError } = await supabase
       .from('products')
       .select('id, name, price, category')
-      .eq('category', 'Normal Apparel') // Sirf unhe check karo jo default par hain
-      .limit(50); // Ek baar me 50 items padhega taki API sasti rahe
+      .eq('category', 'Normal Apparel') 
+      .limit(BATCH_SIZE);
 
-    if (error || !products || products.length === 0) {
-      return NextResponse.json({ status: 'System is 100% Healthy. No suspicious items.' });
+    if (fetchError) throw new Error(`Database Fetch Failed: ${fetchError.message}`);
+
+    if (!products || products.length === 0) {
+      console.log("✅ [AI WATCHER] System is clean. No anomalies found.");
+      return NextResponse.json({ 
+        status: 'success', 
+        message: 'System is 100% Healthy. No suspicious items.' 
+      });
     }
 
-    // 🧠 3. The LLM Prompt (The Brain)
-    const prompt = `
-      You are a precise Tax & Inventory AI Auditor for Rampurhat Garments.
-      Review the following clothing items currently categorized as 'Normal Apparel' (which carries 5% GST).
-      If an item is made of Leather (like jackets, belts) or falls under an 18% GST slab, it is an ANOMALY.
+    // 🧠 3. ADVANCED PROMPT ENGINEERING (Teaching the Agent the exact laws)
+    const systemPrompt = `
+      You are the elite AI Database Auditor for an Indian retail system. 
+      Your job is to find categorization errors that cause GST leakage.
       
-      Items to check: ${JSON.stringify(products)}
+      RULES:
+      1. 'Normal Apparel' attracts 5% GST (default).
+      2. 'Leather Goods' (Jackets, Belts, Shoes made of leather) MUST attract 18% GST.
+      3. Look at the product name. If it implies it is made of Leather, it MUST be categorized as 'Leather Goods'.
+      4. Ignore items that are clearly cotton, denim, or regular apparel.
       
-      Return a JSON array ONLY in this format: 
-      { "anomalies": [ {"id": "123", "name": "...", "suggested_category": "Leather Goods", "reason": "..."} ] }
-      If there are no anomalies, return { "anomalies": [] }.
+      DATA TO AUDIT:
+      ${JSON.stringify(products)}
+      
+      OUTPUT FORMAT:
+      You MUST return ONLY a valid JSON object. Do not include markdown formatting or explanations outside the JSON.
+      {
+        "anomalies": [
+          {
+            "product_id": "uuid-here",
+            "name": "product name",
+            "suggested_category": "Leather Goods",
+            "confidence_score": 95,
+            "reason": "Contains word 'leather', must be 18% slab."
+          }
+        ]
+      }
     `;
 
-    // ⚡ 4. The API Call (Using GPT-4o-mini as an ultra-fast, cheap brain)
-    // Make sure to add OPENAI_API_KEY in your .env.local file
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY || ''}` // Fallback handle
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'system', content: prompt }],
-        response_format: { type: 'json_object' } 
-      })
-    });
+    console.log("🧠 [AI WATCHER] Calling LLM API for deep analysis...");
 
-    const llmData = await response.json();
-    
-    // Fallback: Agar API key nahi hai, toh Agent khud ek simple keyword check lagayega (No API cost)
+    // ⚡ 4. THE AI ENGINE EXECUTION (Robust OpenAI Call)
+    const apiKey = process.env.OPENAI_API_KEY;
     let anomalies = [];
-    if (!process.env.OPENAI_API_KEY) {
+
+    if (apiKey) {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          messages: [{ role: 'system', content: systemPrompt }],
+          response_format: { type: 'json_object' },
+          temperature: 0.1 // Low temperature for maximum analytical accuracy
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(`OpenAI API Error: ${errData.error?.message || 'Unknown error'}`);
+      }
+
+      const llmData = await response.json();
+      const aiResponseContent = llmData.choices.message.content;
+      
+      try {
+        const parsedData = JSON.parse(aiResponseContent);
+        anomalies = parsedData.anomalies || [];
+      } catch (parseErr) {
+        console.error("❌ [AI WATCHER] Failed to parse AI JSON response:", aiResponseContent);
+        throw new Error("AI returned invalid JSON format.");
+      }
+
+    } else {
+      // 🛡️ ZERO-COST FAILSAFE FALLBACK (If API Key is missing or quota exhausted)
+      console.log("⚠️ [AI WATCHER] OPENAI_API_KEY missing. Using local algorithmic fallback.");
       anomalies = products
         .filter(p => p.name.toLowerCase().includes('leather'))
         .map(p => ({
-          id: p.id,
+          product_id: p.id,
           name: p.name,
           suggested_category: 'Leather Goods',
-          reason: 'Hardcoded fallback: Word "leather" found in name.'
+          reason: 'Failsafe local check: Item name contains "leather".'
         }));
-    } else {
-      const content = JSON.parse(llmData.choices.message.content);
-      anomalies = content.anomalies || [];
     }
 
-    // 🚨 5. The Alert System (Reporting to the CTO)
+    // 🚨 5. INJECTING ACTIONABLE ALERTS TO COMMAND CENTER
     if (anomalies.length > 0) {
-      for (const anomaly of anomalies) {
-        await supabase.from('system_alerts').insert({
-          title: '⚠️ Tax Slab Anomaly Detected',
-          description: `AI Watcher found '${anomaly.name}' categorized incorrectly as Normal Apparel. Reason: ${anomaly.reason}. Suggesting update to ${anomaly.suggested_category}.`,
-          priority: 'high',
-          status: 'pending'
-        });
-      }
-      return NextResponse.json({ status: `🚨 Alert! Found ${anomalies.length} anomalies. Check Agency HQ.` });
+      console.log(`🚨 [AI WATCHER] Detected ${anomalies.length} anomalies. Generating action payloads...`);
+      
+      const alertsToInsert = anomalies.map((anomaly: any) => ({
+        title: '⚠️ Tax Slab Anomaly Detected',
+        description: `AI Watcher found '${anomaly.name}' incorrectly mapped. Reason: ${anomaly.reason}. Update required to prevent GST leakage.`,
+        priority: 'high',
+        status: 'pending',
+        // 🔥 THE MAGIC BULLET: Self-healing payload
+        action_payload: { 
+          product_id: anomaly.product_id, 
+          new_category: anomaly.suggested_category 
+        } 
+      }));
+
+      const { error: alertError } = await supabase.from('system_alerts').insert(alertsToInsert);
+      
+      if (alertError) throw new Error(`Failed to dispatch alerts: ${alertError.message}`);
+
+      return NextResponse.json({ 
+        status: 'alert', 
+        message: `Dispatched ${anomalies.length} anomalies to Agency HQ.` 
+      });
     }
 
-    return NextResponse.json({ status: 'Scan complete. System is flawless.' });
+    console.log("✅ [AI WATCHER] Patrol complete. No actions needed.");
+    return NextResponse.json({ status: 'success', message: 'Patrol complete. System is flawless.' });
 
   } catch (error: any) {
-    console.error('AI Watcher Engine Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('❌ [AI WATCHER CRITICAL FAILURE]:', error.message);
+    return NextResponse.json(
+      { status: 'error', message: error.message }, 
+      { status: 500 }
+    );
   }
 }
