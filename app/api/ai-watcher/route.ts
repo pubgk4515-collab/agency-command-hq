@@ -46,14 +46,16 @@ export async function GET(request: Request) {
   const startTime = Date.now();
   console.log("🤖 [HIERARCHICAL SWARM] Initiating network telemetry scan...");
 
-    // 🔒 1. ENTERPRISE SECURITY LOCK
+    // 🔒 1. ENTERPRISE SECURITY LOCK (With CTO Override)
+  const url = new URL(request.url);
+  const isManual = url.searchParams.get('manual') === 'true'; // Override key
   const authHeader = request.headers.get('authorization');
-  const isCTOOverride = request.headers.get('x-cto-override') === 'true'; // 🔥 The Bypass Key
 
-  // Agar production hai, aur request na hi Vercel Cron se aayi hai, na hi CTO dashboard se... toh block karo!
-  if (process.env.NODE_ENV === 'production' && !isCTOOverride && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Agar production me hai, aur manual override true nahi hai, aur password bhi galat hai, tabhi block karo
+  if (process.env.NODE_ENV === 'production' && !isManual && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     console.warn("⛔ Blocked unauthorized execution attempt.");
-    return new NextResponse('Unauthorized', { status: 401 });
+    // Ab text nahi, proper JSON error bhejenge taaki frontend crash na ho
+    return NextResponse.json({ status: 'error', message: 'Unauthorized Execution' }, { status: 401 }); 
   }
 
 

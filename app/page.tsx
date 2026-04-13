@@ -87,33 +87,22 @@ export default function SuperAdminDashboard() {
     }
   };
 
-    // 🔥 THE MANUAL OVERRIDE (Fixed & Upgraded)
+    // 🔥 THE MANUAL OVERRIDE
   const triggerManualScan = async () => {
     setIsScanning(true);
     try {
-      // API ko VIP Pass (Header) bhej rahe hain taaki wo block na kare
-      const res = await fetch('/api/ai-watcher', {
-        headers: { 'x-cto-override': 'true' } 
-      });
-
-      // Agar kisi wajah se abhi bhi block hota hai, toh app crash hone ki jagah actual error text dikhayega
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Access Denied: ${errorText}`);
-      }
-
+      // API me Override Key bhej rahe hain
+      const res = await fetch('/api/infra-guard?manual=true'); 
       const data = await res.json();
       
-      if (data.status === 'success') {
-        alert(`✅ System is Healthy: ${data.message}`);
+      if (data.status === 'healthy' || data.status === 'success') {
+        alert(`✅ System Report: ${data.message}`);
       } else if (data.status === 'error') {
         alert(`❌ Error: ${data.message}`);
       }
-      // Agar alert aaya (Leather wallet pakda gaya), toh WebSocket khud drawer open kar dega!
-      
-    } catch (error: any) {
+    } catch (error) {
       console.error("Manual scan crashed:", error);
-      alert(`⚠️ Scan Stopped: ${error.message}`);
+      alert("❌ Front-end Crash: Could not connect to backend.");
     } finally {
       setIsScanning(false);
     }
