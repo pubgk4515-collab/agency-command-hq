@@ -1,17 +1,17 @@
+export const maxDuration = 60; // 🔥 Vercel Timeout Bypass (60 seconds)
+
 import { NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabase'; 
 
 // 🔥 ENTERPRISE MULTI-AGENT CONFIGURATION
-const INSPECTOR_MODEL = 'gpt-4o-mini'; // Layer 1: Cheap & Fast Guard
-const ANALYST_MODEL = 'gpt-5.4';       // Layer 2: Heavy Thinker / Engineer
+const INSPECTOR_MODEL = 'gpt-4o-mini'; 
+const ANALYST_MODEL = 'gpt-5.4';       
 const BATCH_SIZE = 100; 
 const MAX_RETRIES = 3;
 
-// 🛡️ STRICT TYPE INTERFACES
 interface Product { id: string; name: string; price: number; category: string; }
 interface Anomaly { product_id: string; name: string; suggested_category: string; confidence_score: number; root_cause: string; suggested_fix: string; }
 
-// 🔄 SMART RETRY WRAPPER FOR MULTIPLE MODELS
 async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX_RETRIES): Promise<any> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is missing");
@@ -25,10 +25,10 @@ async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: model, // Dynamically using the requested agent
+          model: model, 
           messages: [{ role: 'system', content: prompt }],
           response_format: { type: 'json_object' },
-          temperature: 0.05 // Ultra-low hallucination risk
+          temperature: 0.05 
         })
       });
 
@@ -37,7 +37,7 @@ async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX
     } catch (error) {
       console.warn(`⚠️ OpenAI attempt ${attempt} failed for ${model}. Retrying...`);
       if (attempt === retries) throw error;
-      await new Promise(res => setTimeout(res, 1000 * attempt)); // Exponential backoff
+      await new Promise(res => setTimeout(res, 1000 * attempt)); 
     }
   }
 }
@@ -46,18 +46,15 @@ export async function GET(request: Request) {
   const startTime = Date.now();
   console.log("🤖 [HIERARCHICAL SWARM] Initiating network telemetry scan...");
 
-    // 🔒 1. ENTERPRISE SECURITY LOCK (With CTO Override)
+  // 🔒 1. ENTERPRISE SECURITY LOCK (With CTO Override)
   const url = new URL(request.url);
-  const isManual = url.searchParams.get('manual') === 'true'; // Override key
+  const isManual = url.searchParams.get('manual') === 'true'; 
   const authHeader = request.headers.get('authorization');
 
-  // Agar production me hai, aur manual override true nahi hai, aur password bhi galat hai, tabhi block karo
   if (process.env.NODE_ENV === 'production' && !isManual && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     console.warn("⛔ Blocked unauthorized execution attempt.");
-    // Ab text nahi, proper JSON error bhejenge taaki frontend crash na ho
     return NextResponse.json({ status: 'error', message: 'Unauthorized Execution' }, { status: 401 }); 
   }
-
 
   try {
     // 🕵️ 2. FETCH VULNERABLE DATA
@@ -90,10 +87,10 @@ export async function GET(request: Request) {
     let suspiciousIds: string[] = [];
     if (process.env.OPENAI_API_KEY) {
       const inspectorData = await fetchOpenAIWithRetry(inspectorPrompt, INSPECTOR_MODEL);
-      suspiciousIds = JSON.parse(inspectorData.choices.message.content).suspicious_ids || [];
+      // 🔥 FIXED: Added here
+      suspiciousIds = JSON.parse(inspectorData.choices[0].message.content).suspicious_ids || [];
     }
 
-    // Agar Inspector ko kuch gadbad nahi lagi, toh system yahi execution rok dega (Saves heavy tokens!)
     if (suspiciousIds.length === 0) {
       console.log("✅ [INSPECTOR] Cleared. No suspicious items found.");
       return NextResponse.json({ status: 'success', message: 'Patrol complete. Area clear.', execution_ms: Date.now() - startTime });
@@ -135,6 +132,7 @@ export async function GET(request: Request) {
     let anomalies: Anomaly[] = [];
     if (process.env.OPENAI_API_KEY) {
       const analystData = await fetchOpenAIWithRetry(analystPrompt, ANALYST_MODEL);
+      // 🔥 FIXED: Added here
       anomalies = JSON.parse(analystData.choices.message.content).anomalies || [];
     }
 
@@ -144,7 +142,6 @@ export async function GET(request: Request) {
     if (anomalies.length > 0) {
       console.log(`🚨 [EXECUTOR] Received ${anomalies.length} fixes from Deep Analyst. Verifying safety...`);
 
-      // 🛡️ ANTI-SPAM LOGIC
       const { data: existingAlerts } = await supabase
         .from('system_alerts')
         .select('action_payload')
@@ -159,10 +156,10 @@ export async function GET(request: Request) {
       if (newAnomalies.length > 0) {
         const alertsToInsert = newAnomalies.map(anomaly => ({
           title: `⚠️ Tax Leakage Risk: ${anomaly.name}`,
-          message: anomaly.root_cause,           // Simple explanation from GPT-5.4
-          suggested_fix: anomaly.suggested_fix,  // Actionable advice from GPT-5.4
+          message: anomaly.root_cause,           
+          suggested_fix: anomaly.suggested_fix,  
           priority: 'high',
-          status: 'REQUIRES_CTO_APPROVAL',       // The Executor NEVER auto-updates. Always requires CTO.
+          status: 'REQUIRES_CTO_APPROVAL',       
           action_payload: { 
             product_id: anomaly.product_id, 
             new_category: anomaly.suggested_category 

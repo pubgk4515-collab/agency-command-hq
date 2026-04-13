@@ -19,7 +19,7 @@ export default function SuperAdminDashboard() {
   const [selectedStore, setSelectedStore] = useState<any | null>(null);
   const [isAlertDrawerOpen, setIsAlertDrawerOpen] = useState(false); 
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [isScanning, setIsScanning] = useState(false); // 🔥 Naya state manual scan ke liye
+  const [isScanning, setIsScanning] = useState(false); 
 
   useEffect(() => {
     fetchNetworkData();
@@ -29,9 +29,7 @@ export default function SuperAdminDashboard() {
       .channel('system-alerts-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_alerts' }, payload => {
         if (payload.new.status === 'REQUIRES_CTO_APPROVAL' || payload.new.status === 'pending') {
-          // Naya alert aate hi instantly state me add karo
           setAlerts(currentAlerts => [payload.new, ...currentAlerts]);
-          // Drawer automatically open karne ka premium touch
           setIsAlertDrawerOpen(true);
         }
       })
@@ -87,12 +85,22 @@ export default function SuperAdminDashboard() {
     }
   };
 
-    // 🔥 THE MANUAL OVERRIDE
+  // 🔥 THE MANUAL OVERRIDE (Timeout-Proof & Crash-Proof)
   const triggerManualScan = async () => {
     setIsScanning(true);
     try {
       // API me Override Key bhej rahe hain
       const res = await fetch('/api/infra-guard?manual=true'); 
+      
+      // 🛡️ Agar Vercel ne 504 Timeout ya 500 error diya, toh crash hone se bachao
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Vercel/Backend Error:", errorText);
+        alert(`❌ Server Error (${res.status}): AI backend limit reached or API crashed. View console for details.`);
+        setIsScanning(false);
+        return;
+      }
+
       const data = await res.json();
       
       if (data.status === 'healthy' || data.status === 'success') {
@@ -102,7 +110,7 @@ export default function SuperAdminDashboard() {
       }
     } catch (error) {
       console.error("Manual scan crashed:", error);
-      alert("❌ Front-end Crash: Could not connect to backend.");
+      alert("❌ Front-end Crash: Could not connect to backend or invalid JSON received.");
     } finally {
       setIsScanning(false);
     }
