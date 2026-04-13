@@ -1,17 +1,18 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabase'; 
 
-// 🔥 ENTERPRISE CONFIGURATION
-const AI_MODEL = 'gpt-4o-mini'; 
+// 🔥 ENTERPRISE MULTI-AGENT CONFIGURATION
+const INSPECTOR_MODEL = 'gpt-4o-mini'; // Layer 1: Cheap & Fast Guard
+const ANALYST_MODEL = 'gpt-5.4';       // Layer 2: Heavy Thinker / Engineer
 const BATCH_SIZE = 100; 
 const MAX_RETRIES = 3;
 
 // 🛡️ STRICT TYPE INTERFACES
 interface Product { id: string; name: string; price: number; category: string; }
-interface Anomaly { product_id: string; name: string; suggested_category: string; confidence_score: number; reason: string; }
+interface Anomaly { product_id: string; name: string; suggested_category: string; confidence_score: number; root_cause: string; suggested_fix: string; }
 
-// 🔄 SMART RETRY WRAPPER FOR OPENAI
-async function fetchOpenAIWithRetry(prompt: string, retries = MAX_RETRIES): Promise<any> {
+// 🔄 SMART RETRY WRAPPER FOR MULTIPLE MODELS
+async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX_RETRIES): Promise<any> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is missing");
 
@@ -24,7 +25,7 @@ async function fetchOpenAIWithRetry(prompt: string, retries = MAX_RETRIES): Prom
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model: AI_MODEL,
+          model: model, // Dynamically using the requested agent
           messages: [{ role: 'system', content: prompt }],
           response_format: { type: 'json_object' },
           temperature: 0.05 // Ultra-low hallucination risk
@@ -34,7 +35,7 @@ async function fetchOpenAIWithRetry(prompt: string, retries = MAX_RETRIES): Prom
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
       return await response.json();
     } catch (error) {
-      console.warn(`⚠️ OpenAI attempt ${attempt} failed. Retrying...`);
+      console.warn(`⚠️ OpenAI attempt ${attempt} failed for ${model}. Retrying...`);
       if (attempt === retries) throw error;
       await new Promise(res => setTimeout(res, 1000 * attempt)); // Exponential backoff
     }
@@ -43,12 +44,12 @@ async function fetchOpenAIWithRetry(prompt: string, retries = MAX_RETRIES): Prom
 
 export async function GET(request: Request) {
   const startTime = Date.now();
-  console.log("🤖 [AI WATCHER] Initiating enterprise telemetry scan...");
+  console.log("🤖 [HIERARCHICAL SWARM] Initiating network telemetry scan...");
 
   // 🔒 1. ENTERPRISE SECURITY LOCK
   const authHeader = request.headers.get('authorization');
   if (process.env.NODE_ENV === 'production' && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    console.warn("⛔ [AI WATCHER] Blocked unauthorized execution attempt.");
+    console.warn("⛔ Blocked unauthorized execution attempt.");
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
@@ -65,19 +66,50 @@ export async function GET(request: Request) {
       return NextResponse.json({ status: 'success', message: 'System is 100% Healthy. No anomalies.', execution_ms: Date.now() - startTime });
     }
 
-    // 🧠 3. CHAIN-OF-THOUGHT PROMPT ENGINEERING
-    const systemPrompt = `
-      You are an elite Retail Tax Auditor AI. Analyze these items currently categorized as 'Normal Apparel' (5% GST).
+    // ==========================================
+    // 🧩 LAYER 1: THE INSPECTOR (GPT-4o-mini)
+    // ==========================================
+    console.log(`🛡️ [INSPECTOR] Scanning ${products.length} items for suspicious keywords...`);
+    
+    const inspectorPrompt = `
+      You are the Level 1 Guard. Review these products. 
+      Flag ANY product that might be made of premium materials like Leather, Silk, or Fur, but is categorized as 'Normal Apparel'.
+      
+      DATA: ${JSON.stringify(products)}
+      
+      OUTPUT STRICTLY AS JSON:
+      { "suspicious_ids": ["uuid-1", "uuid-2"] }
+    `;
+
+    let suspiciousIds: string[] = [];
+    if (process.env.OPENAI_API_KEY) {
+      const inspectorData = await fetchOpenAIWithRetry(inspectorPrompt, INSPECTOR_MODEL);
+      suspiciousIds = JSON.parse(inspectorData.choices.message.content).suspicious_ids || [];
+    }
+
+    // Agar Inspector ko kuch gadbad nahi lagi, toh system yahi execution rok dega (Saves heavy tokens!)
+    if (suspiciousIds.length === 0) {
+      console.log("✅ [INSPECTOR] Cleared. No suspicious items found.");
+      return NextResponse.json({ status: 'success', message: 'Patrol complete. Area clear.', execution_ms: Date.now() - startTime });
+    }
+
+    // ==========================================
+    // 🧠 LAYER 2: DEEP ANALYST (GPT-5.4)
+    // ==========================================
+    console.log(`🧠 [DEEP ANALYST] Escalated ${suspiciousIds.length} items. Waking up GPT-5.4 for deep inspection...`);
+    
+    const flaggedProducts = products.filter(p => suspiciousIds.includes(p.id));
+    
+    const analystPrompt = `
+      You are an elite Retail Tax Auditor and Deep Analyst. 
+      The Level 1 Inspector flagged these items. Analyze them deeply against Indian GST Rules.
       
       RULES:
-      - 'Leather Goods' (Jackets, Belts, Wallets, Shoes made of ANY leather) MUST attract 18% GST.
-      - Think step-by-step: 
-        1. Read the product name.
-        2. Determine the core material.
-        3. If it contains leather/PU leather, it's an anomaly.
+      - 'Leather Goods' MUST attract 18% GST.
+      - Explain the 'root_cause' in simple language for the CTO.
+      - Provide a 'suggested_fix' outlining the exact action required.
       
-      DATA:
-      ${JSON.stringify(products)}
+      DATA: ${JSON.stringify(flaggedProducts)}
       
       OUTPUT STRICTLY AS JSON:
       {
@@ -87,57 +119,44 @@ export async function GET(request: Request) {
             "name": "string",
             "suggested_category": "Leather Goods",
             "confidence_score": 99,
-            "reason": "Detailed explanation"
+            "root_cause": "Detailed simple explanation of why this is wrong",
+            "suggested_fix": "Change category to X to comply with 18% slab"
           }
         ]
       }
     `;
 
     let anomalies: Anomaly[] = [];
-
-    // ⚡ 4. EXECUTE AI OR FALLBACK
     if (process.env.OPENAI_API_KEY) {
-      console.log("🧠 [AI WATCHER] Connecting to OpenAI Neural Net...");
-      const llmData = await fetchOpenAIWithRetry(systemPrompt);
-      // 🔥 FIXED FATAL BUG: choices was missing in the original code
-      const aiResponseContent = llmData.choices.message.content; 
-      anomalies = JSON.parse(aiResponseContent).anomalies || [];
-    } else {
-      console.log("⚠️ [AI WATCHER] API Key missing. Executing local heuristic scan.");
-      anomalies = (products as Product[])
-        .filter(p => p.name.toLowerCase().includes('leather'))
-        .map(p => ({
-          product_id: p.id,
-          name: p.name,
-          suggested_category: 'Leather Goods',
-          confidence_score: 100,
-          reason: 'Local Failsafe: Name implies leather material.'
-        }));
+      const analystData = await fetchOpenAIWithRetry(analystPrompt, ANALYST_MODEL);
+      anomalies = JSON.parse(analystData.choices.message.content).anomalies || [];
     }
 
-    // 🚨 5. ANTI-SPAM & ALERT INJECTION
+    // ==========================================
+    // 🔐 LAYER 3: THE EXECUTOR (Backend Logic)
+    // ==========================================
     if (anomalies.length > 0) {
-      console.log(`🚨 [AI WATCHER] Found ${anomalies.length} potential anomalies. Checking for duplicates...`);
+      console.log(`🚨 [EXECUTOR] Received ${anomalies.length} fixes from Deep Analyst. Verifying safety...`);
 
-      // 🛡️ ANTI-SPAM LOGIC: Check existing pending alerts so we don't spam the CTO dashboard
+      // 🛡️ ANTI-SPAM LOGIC
       const { data: existingAlerts } = await supabase
         .from('system_alerts')
         .select('action_payload')
-        .eq('status', 'pending');
+        .in('status', ['pending', 'REQUIRES_CTO_APPROVAL']);
 
       const existingProductIds = new Set(
         existingAlerts?.map(a => a.action_payload?.product_id).filter(Boolean)
       );
 
-      // Filter out anomalies that are already in the dashboard awaiting approval
       const newAnomalies = anomalies.filter(a => !existingProductIds.has(a.product_id));
 
       if (newAnomalies.length > 0) {
         const alertsToInsert = newAnomalies.map(anomaly => ({
           title: `⚠️ Tax Leakage Risk: ${anomaly.name}`,
-          description: `AI Confidence (${anomaly.confidence_score}%): ${anomaly.reason} Update to ${anomaly.suggested_category} to comply with GST slabs.`,
+          message: anomaly.root_cause,           // Simple explanation from GPT-5.4
+          suggested_fix: anomaly.suggested_fix,  // Actionable advice from GPT-5.4
           priority: 'high',
-          status: 'pending',
+          status: 'REQUIRES_CTO_APPROVAL',       // The Executor NEVER auto-updates. Always requires CTO.
           action_payload: { 
             product_id: anomaly.product_id, 
             new_category: anomaly.suggested_category 
@@ -147,21 +166,21 @@ export async function GET(request: Request) {
         const { error: alertError } = await supabase.from('system_alerts').insert(alertsToInsert);
         if (alertError) throw new Error(`Alert Dispatch Failed: ${alertError.message}`);
         
-        console.log(`✅ [AI WATCHER] Dispatched ${newAnomalies.length} NEW alerts to Command Center.`);
+        console.log(`✅ [EXECUTOR] Safely dispatched ${newAnomalies.length} NEW alerts to CTO Command Center.`);
         return NextResponse.json({ 
           status: 'alert', 
-          message: `Dispatched ${newAnomalies.length} new anomalies to HQ.`,
+          message: `Deep Analyst identified and dispatched ${newAnomalies.length} critical issues.`,
           execution_ms: Date.now() - startTime
         });
       } else {
-        console.log("🛡️ [AI WATCHER] Anomalies found, but alerts are already pending in HQ. Skipping duplicate dispatch.");
+        console.log("🛡️ [EXECUTOR] Issues identified, but already pending in HQ. Blocked duplicate dispatch.");
       }
     }
 
     return NextResponse.json({ status: 'success', message: 'Patrol complete. No new alerts required.', execution_ms: Date.now() - startTime });
 
   } catch (error: any) {
-    console.error('❌ [AI WATCHER CRASH]:', error.message);
+    console.error('❌ [SWARM CRASH]:', error.message);
     return NextResponse.json({ status: 'error', message: error.message }, { status: 500 });
   }
 }

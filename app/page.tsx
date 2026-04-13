@@ -6,35 +6,37 @@ import { toggleStoreFeature } from './actions/agencyActions';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShieldAlert, Store, Zap, Search, Loader2, 
-  Receipt, MessageCircle, Radar, TrendingUp, Bell, AlertTriangle, Check, X
+  Receipt, Radar, TrendingUp, Bell, AlertTriangle, Check, X, Activity
 } from 'lucide-react';
 
 export default function SuperAdminDashboard() {
   const [stores, setStores] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
-  const [alerts, setAlerts] = useState<any[]>([]); // 🔥 AI Alerts State
+  const [alerts, setAlerts] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   
   const [selectedStore, setSelectedStore] = useState<any | null>(null);
-  const [isAlertDrawerOpen, setIsAlertDrawerOpen] = useState(false); // 🔥 Alert Drawer State
+  const [isAlertDrawerOpen, setIsAlertDrawerOpen] = useState(false); 
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false); // 🔥 Naya state manual scan ke liye
 
   useEffect(() => {
     fetchNetworkData();
 
-    // 🚀 FUTURE-PROOFING: Real-time WebSocket Listener for AI Alerts
+    // Real-time WebSocket Listener for AI Alerts
     const alertSubscription = supabase
       .channel('system-alerts-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_alerts' }, payload => {
-        if (payload.new.status === 'pending') {
-          // Naya alert aate hi instantly state me add karo (No refresh needed!)
+        if (payload.new.status === 'REQUIRES_CTO_APPROVAL' || payload.new.status === 'pending') {
+          // Naya alert aate hi instantly state me add karo
           setAlerts(currentAlerts => [payload.new, ...currentAlerts]);
+          // Drawer automatically open karne ka premium touch
+          setIsAlertDrawerOpen(true);
         }
       })
       .subscribe();
 
-    // Cleanup subscription on unmount
     return () => {
       supabase.removeChannel(alertSubscription);
     };
@@ -44,8 +46,7 @@ export default function SuperAdminDashboard() {
     try {
       const { data: storesData } = await supabase.from('stores').select('*').order('created_at', { ascending: false });
       const { data: salesData } = await supabase.from('sales').select('total_amount');
-      // Fetch Pending Alerts
-      const { data: alertsData } = await supabase.from('system_alerts').select('*').eq('status', 'pending').order('created_at', { ascending: false });
+      const { data: alertsData } = await supabase.from('system_alerts').select('*').in('status', ['pending', 'REQUIRES_CTO_APPROVAL']).order('created_at', { ascending: false });
 
       if (storesData) setStores(storesData);
       if (salesData) setSales(salesData);
@@ -74,18 +75,38 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  // 🔥 Handle AI Alert Actions (Approve/Reject)
   const handleAlertAction = async (alertId: string, action: 'approved' | 'rejected') => {
     setUpdatingId(`alert-${alertId}`);
     try {
       await supabase.from('system_alerts').update({ status: action }).eq('id', alertId);
-      // Remove from UI instantly with animation support
       setAlerts(alerts.filter(a => a.id !== alertId));
-      // We do NOT auto-close the drawer anymore, so the user can see the "System Healthy" success state.
     } catch (err) {
       console.error("Failed to update alert", err);
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  // 🔥 THE MANUAL OVERRIDE (Trigger Target 3)
+  const triggerManualScan = async () => {
+    setIsScanning(true);
+    try {
+      // Ye direct aapke banaye hue infra-guard (Target 3) API ko hit karega
+      const res = await fetch('/api/infra-guard');
+      const data = await res.json();
+      
+      if (data.status === 'healthy') {
+        // Agar sab theek hai toh UI me alert dikha do
+        alert(`✅ System is Healthy: ${data.message}`);
+      } else if (data.status === 'error') {
+        alert(`❌ Error: ${data.message}`);
+      }
+      // Agar 'alert' status aaya toh kuch nahi karna, WebSocket automatically drawer khol dega!
+    } catch (error) {
+      console.error("Manual scan crashed:", error);
+      alert("❌ Critical System Failure during manual scan.");
+    } finally {
+      setIsScanning(false);
     }
   };
 
@@ -102,7 +123,7 @@ export default function SuperAdminDashboard() {
   return (
     <div className="min-h-screen bg-[#050505] text-white font-sans overflow-x-hidden selection:bg-emerald-500/30">
       
-      {/* 👑 HEADER with AI Alert Bell */}
+      {/* 👑 HEADER */}
       <header className="bg-[#0A0A0A]/90 backdrop-blur-xl border-b border-white/5 sticky top-0 z-30 px-6 py-5">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -115,21 +136,39 @@ export default function SuperAdminDashboard() {
             </div>
           </div>
 
-          {/* AI Alert Bell Button (Always clickable now) */}
-          <button 
-            onClick={() => setIsAlertDrawerOpen(true)}
-            className="relative p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all flex items-center justify-center"
-          >
-            <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-rose-400 animate-pulse' : 'text-zinc-500'}`} />
-            {alerts.length > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-4 w-4">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-[#0A0A0A] text-[8px] font-black items-center justify-center text-white">
-                  {alerts.length}
-                </span>
+          <div className="flex items-center gap-4">
+            {/* 🔥 NEW MANUAL SCAN BUTTON */}
+            <button 
+              onClick={triggerManualScan}
+              disabled={isScanning}
+              className="group relative px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full hover:bg-emerald-500/20 transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+              {isScanning ? (
+                <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+              ) : (
+                <Activity className="w-4 h-4 text-emerald-400 group-hover:animate-pulse" />
+              )}
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                {isScanning ? 'Scanning...' : 'Manual Scan'}
               </span>
-            )}
-          </button>
+            </button>
+
+            {/* AI Alert Bell Button */}
+            <button 
+              onClick={() => setIsAlertDrawerOpen(true)}
+              className="relative p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all flex items-center justify-center"
+            >
+              <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-rose-400 animate-pulse' : 'text-zinc-500'}`} />
+              {alerts.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-[#0A0A0A] text-[8px] font-black items-center justify-center text-white">
+                    {alerts.length}
+                  </span>
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -208,7 +247,6 @@ export default function SuperAdminDashboard() {
                 <button onClick={() => setIsAlertDrawerOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
               </div>
 
-              {/* 🔥 FUTURE PROOF: Premium Empty State UI */}
               <div className="flex flex-col gap-4">
                 {alerts.length === 0 ? (
                   <motion.div 
@@ -231,8 +269,10 @@ export default function SuperAdminDashboard() {
                         className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group"
                       >
                         <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 blur-[40px]" />
-                        <h3 className="text-base font-black text-white relative z-10">{alert.title}</h3>
-                        <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">{alert.description}</p>
+                        <h3 className="text-base font-black text-white relative z-10">{alert.message?.substring(0,50)}...</h3>
+                        <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">
+                          {alert.suggested_fix || alert.message}
+                        </p>
                         
                         <div className="flex items-center gap-3 mt-6 relative z-10">
                           <button 

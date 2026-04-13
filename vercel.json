@@ -3,6 +3,10 @@
     {
       "path": "/api/ai-watcher",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/infra-guard",
+      "schedule": "30 0 * * *"
     }
   ]
 }
