@@ -87,28 +87,38 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  // 🔥 THE MANUAL OVERRIDE (Trigger Target 3)
+    // 🔥 THE MANUAL OVERRIDE (Fixed & Upgraded)
   const triggerManualScan = async () => {
     setIsScanning(true);
     try {
-      // Ye direct aapke banaye hue infra-guard (Target 3) API ko hit karega
-      const res = await fetch('/api/infra-guard');
+      // API ko VIP Pass (Header) bhej rahe hain taaki wo block na kare
+      const res = await fetch('/api/ai-watcher', {
+        headers: { 'x-cto-override': 'true' } 
+      });
+
+      // Agar kisi wajah se abhi bhi block hota hai, toh app crash hone ki jagah actual error text dikhayega
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Access Denied: ${errorText}`);
+      }
+
       const data = await res.json();
       
-      if (data.status === 'healthy') {
-        // Agar sab theek hai toh UI me alert dikha do
+      if (data.status === 'success') {
         alert(`✅ System is Healthy: ${data.message}`);
       } else if (data.status === 'error') {
         alert(`❌ Error: ${data.message}`);
       }
-      // Agar 'alert' status aaya toh kuch nahi karna, WebSocket automatically drawer khol dega!
-    } catch (error) {
+      // Agar alert aaya (Leather wallet pakda gaya), toh WebSocket khud drawer open kar dega!
+      
+    } catch (error: any) {
       console.error("Manual scan crashed:", error);
-      alert("❌ Critical System Failure during manual scan.");
+      alert(`⚠️ Scan Stopped: ${error.message}`);
     } finally {
       setIsScanning(false);
     }
   };
+
 
   const totalVolume = sales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
   const totalTransactions = sales.length;

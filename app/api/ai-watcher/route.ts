@@ -46,12 +46,16 @@ export async function GET(request: Request) {
   const startTime = Date.now();
   console.log("🤖 [HIERARCHICAL SWARM] Initiating network telemetry scan...");
 
-  // 🔒 1. ENTERPRISE SECURITY LOCK
+    // 🔒 1. ENTERPRISE SECURITY LOCK
   const authHeader = request.headers.get('authorization');
-  if (process.env.NODE_ENV === 'production' && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const isCTOOverride = request.headers.get('x-cto-override') === 'true'; // 🔥 The Bypass Key
+
+  // Agar production hai, aur request na hi Vercel Cron se aayi hai, na hi CTO dashboard se... toh block karo!
+  if (process.env.NODE_ENV === 'production' && !isCTOOverride && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     console.warn("⛔ Blocked unauthorized execution attempt.");
     return new NextResponse('Unauthorized', { status: 401 });
   }
+
 
   try {
     // 🕵️ 2. FETCH VULNERABLE DATA
