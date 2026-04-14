@@ -3,8 +3,10 @@ export const maxDuration = 60;
 import { NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabase'; 
 
-const INSPECTOR_MODEL = 'gpt-4o-mini'; 
-const ANALYST_MODEL = 'gpt-4o'; // ✅ safe + available
+// 🔥 GPT-5.4 MODELS
+const INSPECTOR_MODEL = 'gpt-5.4-mini'; 
+const ANALYST_MODEL = 'gpt-5.4';
+
 const BATCH_SIZE = 100; 
 const MAX_RETRIES = 3;
 
@@ -21,13 +23,14 @@ function safeParse(content: string | null) {
   }
 }
 
+// ✅ GPT-5.4 RESPONSES API CALL (FUTURE-PROOF)
 async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX_RETRIES): Promise<any> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is missing");
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -35,24 +38,42 @@ async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX
         },
         body: JSON.stringify({
           model,
-          messages: [
-            { role: 'system', content: 'You are a strict JSON generator. Always return valid JSON only.' },
-            { role: 'user', content: prompt }
+          input: [
+            {
+              role: "system",
+              content: "You are a strict JSON generator. Always return valid JSON only."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
           ],
-          temperature: 0.05
+          temperature: 0.05,
+          response_format: { type: "json_object" }
         })
       });
 
-      if (!response.ok) throw new Error(`API Error: ${response.status}`);
-      return await response.json();
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API Error ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+
+      // ✅ NEW parsing format
+      const content = data?.output?.[0]?.content?.[0]?.text;
+
+      return { content };
+
     } catch (error) {
       console.warn(`⚠️ Attempt ${attempt} failed for ${model}`);
       if (attempt === retries) throw error;
-      await new Promise(res => setTimeout(res, 2 ** attempt * 500)); // ✅ exponential backoff
+      await new Promise(res => setTimeout(res, 2 ** attempt * 500));
     }
   }
 }
 
+// ================= MAIN HANDLER =================
 export async function GET(request: Request) {
   const startTime = Date.now();
 
@@ -65,6 +86,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    // ================= FETCH PRODUCTS =================
     const { data: products, error } = await supabase
       .from('products')
       .select('id, name, price, category')
@@ -72,69 +94,78 @@ export async function GET(request: Request) {
       .limit(BATCH_SIZE);
 
     if (error) throw new Error(error.message);
+
     if (!products?.length) {
-      return NextResponse.json({ status: 'success', message: 'No anomalies', execution_ms: Date.now() - startTime });
+      return NextResponse.json({
+        status: 'success',
+        message: 'No anomalies',
+        execution_ms: Date.now() - startTime
+      });
     }
 
     // ================= INSPECTOR =================
     const inspectorPrompt = `
-      Flag ANY product even slightly indicating premium materials 
-      (leather, silk, fur, suede, hide, etc).
-      Prefer false positives.
+Flag ANY product even slightly indicating premium materials 
+(leather, silk, fur, suede, hide, etc).
+Prefer false positives.
 
-      DATA: ${JSON.stringify(products)}
+DATA: ${JSON.stringify(products)}
 
-      OUTPUT:
-      { "suspicious_ids": [] }
-    `;
+OUTPUT:
+{ "suspicious_ids": [] }
+`;
 
     const inspectorRes = await fetchOpenAIWithRetry(inspectorPrompt, INSPECTOR_MODEL);
-    const inspectorContent = inspectorRes?.choices?.[0]?.message?.content;
+    const parsedInspector = safeParse(inspectorRes?.content);
 
-    const parsedInspector = safeParse(inspectorContent);
     const suspiciousIds: string[] = parsedInspector.suspicious_ids || [];
 
     if (!suspiciousIds.length) {
-      return NextResponse.json({ status: 'success', message: 'All clean', execution_ms: Date.now() - startTime });
+      return NextResponse.json({
+        status: 'success',
+        message: 'All clean',
+        execution_ms: Date.now() - startTime
+      });
     }
 
     // ================= ANALYST =================
     const flaggedProducts = products.filter(p => suspiciousIds.includes(p.id));
 
     const analystPrompt = `
-      Analyze GST mismatch.
+Analyze GST mismatch.
 
-      RULE:
-      Leather Goods = 18%
+RULE:
+Leather Goods = 18%
 
-      DATA: ${JSON.stringify(flaggedProducts)}
+DATA: ${JSON.stringify(flaggedProducts)}
 
-      OUTPUT:
-      {
-        "anomalies": [
-          {
-            "product_id": "",
-            "name": "",
-            "suggested_category": "",
-            "confidence_score": 0,
-            "root_cause": "",
-            "suggested_fix": ""
-          }
-        ]
-      }
-    `;
+OUTPUT:
+{
+  "anomalies": [
+    {
+      "product_id": "",
+      "name": "",
+      "suggested_category": "",
+      "confidence_score": 0,
+      "root_cause": "",
+      "suggested_fix": ""
+    }
+  ]
+}
+`;
 
     const analystRes = await fetchOpenAIWithRetry(analystPrompt, ANALYST_MODEL);
-    const analystContent = analystRes?.choices?.[0]?.message?.content;
-
-    const parsedAnalyst = safeParse(analystContent);
-    let anomalies: Anomaly[] = parsedAnalyst.anomalies || [];
+    let anomalies: Anomaly[] = safeParse(analystRes?.content).anomalies || [];
 
     // ✅ confidence filter
     anomalies = anomalies.filter(a => a.confidence_score > 85);
 
     if (!anomalies.length) {
-      return NextResponse.json({ status: 'success', message: 'No high-confidence issues', execution_ms: Date.now() - startTime });
+      return NextResponse.json({
+        status: 'success',
+        message: 'No high-confidence issues',
+        execution_ms: Date.now() - startTime
+      });
     }
 
     // ================= EXECUTOR =================
@@ -150,7 +181,11 @@ export async function GET(request: Request) {
     const newAnomalies = anomalies.filter(a => !existingIds.has(a.product_id));
 
     if (!newAnomalies.length) {
-      return NextResponse.json({ status: 'success', message: 'No new alerts', execution_ms: Date.now() - startTime });
+      return NextResponse.json({
+        status: 'success',
+        message: 'No new alerts',
+        execution_ms: Date.now() - startTime
+      });
     }
 
     const alerts = newAnomalies.map(a => ({
@@ -165,7 +200,10 @@ export async function GET(request: Request) {
       }
     }));
 
-    const { error: insertError } = await supabase.from('system_alerts').insert(alerts);
+    const { error: insertError } = await supabase
+      .from('system_alerts')
+      .insert(alerts);
+
     if (insertError) throw new Error(insertError.message);
 
     return NextResponse.json({
@@ -175,6 +213,9 @@ export async function GET(request: Request) {
     });
 
   } catch (err: any) {
-    return NextResponse.json({ status: 'error', message: err.message }, { status: 500 });
+    return NextResponse.json({
+      status: 'error',
+      message: err.message
+    }, { status: 500 });
   }
 }
