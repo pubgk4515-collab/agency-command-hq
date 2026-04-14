@@ -3,7 +3,7 @@ export const maxDuration = 60;
 import { NextResponse } from 'next/server';
 import { supabase } from '../../../lib/supabase'; 
 
-// 🔥 GPT-5.4 MODELS
+// 🔥 MODELS
 const INSPECTOR_MODEL = 'gpt-5.4-mini'; 
 const ANALYST_MODEL = 'gpt-5.4';
 
@@ -13,7 +13,7 @@ const MAX_RETRIES = 3;
 interface Product { id: string; name: string; price: number; category: string; }
 interface Anomaly { product_id: string; name: string; suggested_category: string; confidence_score: number; root_cause: string; suggested_fix: string; }
 
-// ✅ SAFE JSON PARSER
+// ✅ SAFE PARSE
 function safeParse(content: string | null) {
   try {
     return content ? JSON.parse(content) : {};
@@ -23,84 +23,70 @@ function safeParse(content: string | null) {
   }
 }
 
-// ✅ GPT-5.4 RESPONSES API CALL (FUTURE-PROOF)
+// ✅ OPENAI CALL
 async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX_RETRIES): Promise<any> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is missing");
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const response = await fetch('https://api.openai.com/v1/responses', {
+      const res = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-  model,
-  input: [
-    {
-      role: "system",
-      content: "You are a strict JSON generator. Always return valid JSON only."
-    },
-    {
-      role: "user",
-      content: prompt
-    }
-  ],
-  temperature: 0.05,
-  text: { format: { type: "json_object" } }
-})
+          model,
+          input: [
+            {
+              role: "system",
+              content: "You are a strict JSON generator. Always return valid JSON only."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          temperature: 0.05,
+          text: { format: { type: "json_object" } }
+        })
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`API Error ${response.status}: ${errText}`);
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`API Error ${res.status}: ${err}`);
       }
 
-      const data = await response.json();
-
-      // ✅ NEW parsing format
+      const data = await res.json();
       const content = data?.output?.[0]?.content?.[0]?.text;
 
       return { content };
 
-    } catch (error) {
-      console.warn(`⚠️ Attempt ${attempt} failed for ${model}`);
-      if (attempt === retries) throw error;
-      await new Promise(res => setTimeout(res, 2 ** attempt * 500));
+    } catch (err) {
+      console.warn(`⚠️ Attempt ${attempt} failed (${model})`);
+      if (attempt === retries) throw err;
+      await new Promise(r => setTimeout(r, 2 ** attempt * 500));
     }
   }
 }
 
-// ================= MAIN HANDLER =================
+// ================= MAIN =================
 export async function GET(request: Request) {
   const startTime = Date.now();
 
-  const url = new URL(request.url);
-  const isManual = url.searchParams.get('manual') === 'true'; 
-  const authHeader = request.headers.get('authorization');
-
-  if (process.env.NODE_ENV === 'production' && !isManual && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ status: 'error', message: 'Unauthorized Execution' }, { status: 401 }); 
-  }
-
   try {
-    // ================= FETCH PRODUCTS =================
+    // ================= FETCH =================
     const { data: products, error } = await supabase
       .from('products')
       .select('id, name, price, category')
-      .eq('category', 'Normal Apparel') 
+      .eq('category', 'Normal Apparel')
       .limit(BATCH_SIZE);
 
     if (error) throw new Error(error.message);
 
     if (!products?.length) {
-      return NextResponse.json({
-        status: 'success',
-        message: 'No anomalies',
-        execution_ms: Date.now() - startTime
-      });
+      return NextResponse.json({ status: 'success', message: 'No data' });
     }
 
     // ================= INSPECTOR =================
@@ -118,24 +104,23 @@ OUTPUT:
     const inspectorRes = await fetchOpenAIWithRetry(inspectorPrompt, INSPECTOR_MODEL);
     const parsedInspector = safeParse(inspectorRes?.content);
 
+    console.log("🧠 Inspector:", parsedInspector);
+
     const suspiciousIds: string[] = parsedInspector.suspicious_ids || [];
 
     if (!suspiciousIds.length) {
-      return NextResponse.json({
-        status: 'success',
-        message: 'All clean',
-        execution_ms: Date.now() - startTime
-      });
+      return NextResponse.json({ status: 'success', message: 'All clean' });
     }
 
     // ================= ANALYST =================
     const flaggedProducts = products.filter(p => suspiciousIds.includes(p.id));
 
-    const analystPrompt = `
-Analyze GST mismatch.
+    console.log("🚩 Flagged:", flaggedProducts);
 
-RULE:
-Leather Goods = 18%
+    const analystPrompt = `
+STRICT RULE:
+If product contains leather → MUST NOT be "Normal Apparel"
+It MUST be categorized as "Leather Goods"
 
 DATA: ${JSON.stringify(flaggedProducts)}
 
@@ -155,17 +140,17 @@ OUTPUT:
 `;
 
     const analystRes = await fetchOpenAIWithRetry(analystPrompt, ANALYST_MODEL);
-    let anomalies: Anomaly[] = safeParse(analystRes?.content).anomalies || [];
+    const parsedAnalyst = safeParse(analystRes?.content);
 
-    // ✅ confidence filter
+    console.log("🧠 Analyst:", parsedAnalyst);
+
+    let anomalies: Anomaly[] = parsedAnalyst.anomalies || [];
+
+    // 🔥 DEBUG MODE (later increase)
     anomalies = anomalies.filter(a => a.confidence_score > 0);
 
     if (!anomalies.length) {
-      return NextResponse.json({
-        status: 'success',
-        message: 'No high-confidence issues',
-        execution_ms: Date.now() - startTime
-      });
+      return NextResponse.json({ status: 'success', message: 'No issues' });
     }
 
     // ================= EXECUTOR =================
@@ -181,16 +166,13 @@ OUTPUT:
     const newAnomalies = anomalies.filter(a => !existingIds.has(a.product_id));
 
     if (!newAnomalies.length) {
-      return NextResponse.json({
-        status: 'success',
-        message: 'No new alerts',
-        execution_ms: Date.now() - startTime
-      });
+      return NextResponse.json({ status: 'success', message: 'No new alerts' });
     }
 
+    // ✅ FIXED COLUMN NAME (description)
     const alerts = newAnomalies.map(a => ({
       title: `⚠️ Tax Leakage: ${a.name}`,
-      message: a.root_cause,
+      description: a.root_cause, // 🔥 FIX
       suggested_fix: a.suggested_fix,
       priority: 'high',
       status: 'REQUIRES_CTO_APPROVAL',
@@ -208,11 +190,13 @@ OUTPUT:
 
     return NextResponse.json({
       status: 'alert',
-      message: `${alerts.length} issues detected`,
+      count: alerts.length,
       execution_ms: Date.now() - startTime
     });
 
   } catch (err: any) {
+    console.error("🔥 FINAL ERROR:", err.message);
+
     return NextResponse.json({
       status: 'error',
       message: err.message
