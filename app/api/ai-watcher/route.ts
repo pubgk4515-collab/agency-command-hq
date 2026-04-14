@@ -158,7 +158,7 @@ OUTPUT:
     let anomalies: Anomaly[] = safeParse(analystRes?.content).anomalies || [];
 
     // ✅ confidence filter
-    anomalies = anomalies.filter(a => a.confidence_score > 85);
+    anomalies = anomalies.filter(a => a.confidence_score > 0);
 
     if (!anomalies.length) {
       return NextResponse.json({
