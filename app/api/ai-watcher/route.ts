@@ -171,16 +171,23 @@ OUTPUT:
 
     // ✅ FIXED COLUMN NAME (description)
     const alerts = newAnomalies.map(a => ({
-      title: `⚠️ Tax Leakage: ${a.name}`,
-      description: a.root_cause, // 🔥 FIX
-      suggested_fix: a.suggested_fix,
-      priority: 'high',
-      status: 'REQUIRES_CTO_APPROVAL',
-      action_payload: {
-        product_id: a.product_id,
-        new_category: a.suggested_category
-      }
-    }));
+  title: `⚠️ Tax Leakage Risk: ${a.name}`,
+
+  // ✅ description me sab combine kar
+  description: `AI Confidence (${a.confidence_score}%): ${a.root_cause}`,
+
+  priority: 'high',
+  status: 'approved', // 👈 tera DB me ye hi chal raha hai
+
+  action_payload: {
+    product_id: a.product_id,
+    new_category: a.suggested_category,
+
+    // 🔥 extra data yaha daal (DB safe)
+    suggested_fix: a.suggested_fix,
+    confidence: a.confidence_score
+  }
+}));
 
     const { error: insertError } = await supabase
       .from('system_alerts')
