@@ -90,7 +90,7 @@ export default function SuperAdminDashboard() {
     setIsScanning(true);
     try {
       // API me Override Key bhej rahe hain
-      const res = await fetch('/api/infra-guard?manual=true'); 
+      const res = await fetch('/api/ai-watcher?manual=true'); 
       
       // 🛡️ Agar Vercel ne 504 Timeout ya 500 error diya, toh crash hone se bachao
       if (!res.ok) {
