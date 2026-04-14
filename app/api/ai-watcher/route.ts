@@ -133,7 +133,7 @@ export async function GET(request: Request) {
     if (process.env.OPENAI_API_KEY) {
       const analystData = await fetchOpenAIWithRetry(analystPrompt, ANALYST_MODEL);
       // 🔥 FIXED: Added here
-      anomalies = JSON.parse(analystData.choices.message.content).anomalies || [];
+      anomalies = JSON.parse(analystData.choices[0].message.content).anomalies || [];
     }
 
     // ==========================================
