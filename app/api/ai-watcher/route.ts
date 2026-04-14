@@ -75,6 +75,14 @@ async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX
 export async function GET(request: Request) {
   const startTime = Date.now();
 
+  const url = new URL(request.url);
+  const isManual = url.searchParams.get('manual') === 'true'; 
+  const authHeader = request.headers.get('authorization');
+
+  if (process.env.NODE_ENV === 'production' && !isManual && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ status: 'error', message: 'Unauthorized Execution' }, { status: 401 }); 
+  }
+
   try {
     // ================= FETCH =================
     const { data: products, error } = await supabase
@@ -146,11 +154,15 @@ OUTPUT:
 
     let anomalies: Anomaly[] = parsedAnalyst.anomalies || [];
 
-    // 🔥 DEBUG MODE (later increase)
-    anomalies = anomalies.filter(a => a.confidence_score > 0);
+    // 🔥 SMART CONFIDENCE FILTER (Handles 0.99 and 99 automatically)
+    anomalies = anomalies.filter(a => {
+      let score = Number(a.confidence_score) || 0;
+      if (score <= 1 && score > 0) score = score * 100; // 0.99 becomes 99
+      return score >= 75; // 75% se upar wale pass
+    });
 
     if (!anomalies.length) {
-      return NextResponse.json({ status: 'success', message: 'No issues' });
+      return NextResponse.json({ status: 'success', message: 'No high-confidence issues' });
     }
 
     // ================= EXECUTOR =================
@@ -169,25 +181,24 @@ OUTPUT:
       return NextResponse.json({ status: 'success', message: 'No new alerts' });
     }
 
-    // ✅ FIXED COLUMN NAME (description)
-    const alerts = newAnomalies.map(a => ({
-  title: `⚠️ Tax Leakage Risk: ${a.name}`,
+    // ✅ FIXED FORMAT FOR UI DRAWER & RADAR
+    const alerts = newAnomalies.map(a => {
+      let score = Number(a.confidence_score) || 0;
+      if (score <= 1 && score > 0) score = score * 100; // Math fix for description display
 
-  // ✅ description me sab combine kar
-  description: `AI Confidence (${a.confidence_score}%): ${a.root_cause}`,
-
-  priority: 'high',
-  status: 'approved', // 👈 tera DB me ye hi chal raha hai
-
-  action_payload: {
-    product_id: a.product_id,
-    new_category: a.suggested_category,
-
-    // 🔥 extra data yaha daal (DB safe)
-    suggested_fix: a.suggested_fix,
-    confidence: a.confidence_score
-  }
-}));
+      return {
+        title: `⚠️ Tax Leakage Risk: ${a.name}`,
+        description: `AI Confidence (${Math.round(score)}%): ${a.root_cause}`,
+        priority: 'high',
+        status: 'REQUIRES_CTO_APPROVAL', // 🔥 Radar ko jagane ke liye wapas CTO approval pe daal diya
+        action_payload: {
+          product_id: a.product_id,
+          new_category: a.suggested_category,
+          suggested_fix: a.suggested_fix,
+          confidence: Math.round(score)
+        }
+      };
+    });
 
     const { error: insertError } = await supabase
       .from('system_alerts')
