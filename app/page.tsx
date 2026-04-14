@@ -73,17 +73,39 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  const handleAlertAction = async (alertId: string, action: 'approved' | 'rejected') => {
+    const handleAlertAction = async (alertId: string, action: 'approved' | 'rejected') => {
     setUpdatingId(`alert-${alertId}`);
     try {
+      // 1. Pehle us alert ka data nikalte hain jisme product_id aur naya category chhipa hai
+      const alertToProcess = alerts.find(a => a.id === alertId);
+
+      // 2. Agar aapne APPROVE kiya hai, toh asli database change yahan hoga!
+      if (action === 'approved' && alertToProcess?.action_payload) {
+        const { product_id, new_category } = alertToProcess.action_payload;
+        
+        // 🔥 MAGIC: Products table me category update ho rahi hai!
+        const { error: productError } = await supabase
+          .from('products')
+          .update({ category: new_category }) // 'Normal Apparel' se 'Leather Goods' ban gaya
+          .eq('id', product_id);
+          
+        if (productError) throw new Error(`Product update failed: ${productError.message}`);
+      }
+
+      // 3. Alert ko 'approved' ya 'rejected' mark karke close kar do
       await supabase.from('system_alerts').update({ status: action }).eq('id', alertId);
+      
+      // 4. UI drawer se alert hata do
       setAlerts(alerts.filter(a => a.id !== alertId));
+      
     } catch (err) {
-      console.error("Failed to update alert", err);
+      console.error("Failed to execute alert action:", err);
+      alert("❌ Database Update Failed!");
     } finally {
       setUpdatingId(null);
     }
   };
+
 
   // 🔥 THE MANUAL OVERRIDE (Timeout-Proof & Crash-Proof)
   const triggerManualScan = async () => {
