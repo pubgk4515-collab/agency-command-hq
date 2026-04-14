@@ -37,20 +37,20 @@ async function fetchOpenAIWithRetry(prompt: string, model: string, retries = MAX
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model,
-          input: [
-            {
-              role: "system",
-              content: "You are a strict JSON generator. Always return valid JSON only."
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          temperature: 0.05,
-          response_format: { type: "json_object" }
-        })
+  model,
+  input: [
+    {
+      role: "system",
+      content: "You are a strict JSON generator. Always return valid JSON only."
+    },
+    {
+      role: "user",
+      content: prompt
+    }
+  ],
+  temperature: 0.05,
+  text: { format: { type: "json_object" } }
+})
       });
 
       if (!response.ok) {
