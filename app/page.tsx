@@ -266,20 +266,31 @@ export default function SuperAdminDashboard() {
                     <p className="text-xs mt-2 opacity-50 font-medium">No pending AI alerts or anomalies detected.</p>
                   </motion.div>
                 ) : (
-                  <AnimatePresence>
+                                    <AnimatePresence>
                     {alerts.map((alert) => (
                       <motion.div 
                         key={alert.id}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, x: -50 }}
-                        className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group"
+                        className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group mb-4"
                       >
                         <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 blur-[40px]" />
-                        <h3 className="text-base font-black text-white relative z-10">{alert.message?.substring(0,50)}...</h3>
+                        
+                        {/* 🔥 THE FIX: 'message' hata kar 'title' aur 'description' lagaya */}
+                        <h3 className="text-base font-black text-white relative z-10">
+                          {alert.title || "⚠️ System Alert"}
+                        </h3>
                         <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">
-                          {alert.suggested_fix || alert.message}
+                          {alert.description || "Checking details..."}
                         </p>
+                        
+                        {/* Extra Detail: Suggested Fix dikhane ke liye */}
+                        {alert.action_payload?.suggested_fix && (
+                           <p className="text-xs text-emerald-400 mt-2 font-bold relative z-10">
+                             Fix: {alert.action_payload.suggested_fix}
+                           </p>
+                        )}
                         
                         <div className="flex items-center gap-3 mt-6 relative z-10">
                           <button 
@@ -300,6 +311,7 @@ export default function SuperAdminDashboard() {
                       </motion.div>
                     ))}
                   </AnimatePresence>
+
                 )}
               </div>
 
