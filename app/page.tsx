@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { toggleStoreFeature } from './actions/agencyActions'; // Ensure this can handle string updates too if needed for plans
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShieldAlert, Store, Zap, Search, Loader2, 
@@ -56,39 +55,47 @@ export default function SuperAdminDashboard() {
     }
   };
 
-  // Handles boolean toggles (like removing the blur)
+  // 🔥 DIRECT SUPABASE TOGGLE (Bypasses old actions to prevent crashes)
   const handleToggle = async (storeId: string, featureColumn: string, currentValue: boolean) => {
     setUpdatingId(`${storeId}-${featureColumn}`);
     try {
-      const result = await toggleStoreFeature(storeId, featureColumn, !currentValue);
-      if (result.success) {
-        setStores(stores.map(s => s.id === storeId ? { ...s, [featureColumn]: !currentValue } : s));
-        if (selectedStore?.id === storeId) {
-          setSelectedStore({ ...selectedStore, [featureColumn]: !currentValue });
-        }
+      const { error } = await supabase
+        .from('stores')
+        .update({ [featureColumn]: !currentValue })
+        .eq('id', storeId);
+        
+      if (error) throw error;
+      
+      setStores(stores.map(s => s.id === storeId ? { ...s, [featureColumn]: !currentValue } : s));
+      if (selectedStore?.id === storeId) {
+        setSelectedStore({ ...selectedStore, [featureColumn]: !currentValue });
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Toggle failed:", err);
+      alert(`❌ Update Failed: Make sure column '${featureColumn}' exists in stores table!`);
     } finally {
       setUpdatingId(null);
     }
   };
 
-  // Handles String updates (like changing subscription plan)
+  // 🔥 DIRECT PLAN UPDATE
   const handlePlanUpdate = async (storeId: string, newPlan: string) => {
     setUpdatingId(`${storeId}-plan`);
     try {
-      // NOTE: You will need to ensure your backend action or direct supabase call supports updating the 'plan_tier' string column
-      const { error } = await supabase.from('stores').update({ plan_tier: newPlan }).eq('id', storeId);
+      const { error } = await supabase
+        .from('stores')
+        .update({ plan_tier: newPlan })
+        .eq('id', storeId);
+        
       if (error) throw error;
       
       setStores(stores.map(s => s.id === storeId ? { ...s, plan_tier: newPlan } : s));
       if (selectedStore?.id === storeId) {
         setSelectedStore({ ...selectedStore, plan_tier: newPlan });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to update plan:", err);
-      alert("Plan update failed!");
+      alert(`❌ Plan update failed: Make sure 'plan_tier' column exists!`);
     } finally {
       setUpdatingId(null);
     }
@@ -215,22 +222,22 @@ export default function SuperAdminDashboard() {
             
             <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed top-0 right-0 h-full w-full sm:w-[500px] bg-[#0A0A0A] border-l border-white/10 z-50 shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-y-auto">
               
-              {/* Drawer Header */}
-              <div className="sticky top-0 bg-[#0A0A0A]/90 backdrop-blur-xl border-b border-white/5 p-6 z-10 flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-black text-white">{selectedStore.store_name}</h2>
+              {/* 🔥 FIXED OVERLAPPING HEADER: Solid background, z-50, and proper spacing */}
+              <div className="sticky top-0 bg-[#0A0A0A] border-b border-white/10 p-6 z-50 flex items-start justify-between shadow-xl">
+                <div className="flex-1 pr-4">
+                  <h2 className="text-xl sm:text-2xl font-black text-white truncate leading-tight">{selectedStore.store_name}</h2>
                   <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Tenant Control Panel</p>
                 </div>
-                <button onClick={() => setSelectedStore(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors"><X className="w-5 h-5 text-zinc-400" /></button>
+                <button onClick={() => setSelectedStore(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors shrink-0"><X className="w-5 h-5 text-zinc-400" /></button>
               </div>
 
-              <div className="p-6 flex flex-col gap-8">
+              <div className="p-6 flex flex-col gap-8 relative z-10">
                 
                 {/* 🟢 ACCESS CONTROLS (THE BLUR REMOVER) */}
                 <div>
                   <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-4">God Mode Controls</h3>
                   <div className="flex flex-col gap-3">
-                    {/* 🔥 THE MASTER SWITCH TO REMOVE BLUR FROM STORE DASHBOARD */}
+                    {/* 🔥 THE MASTER SWITCH */}
                     <FeatureToggle 
                       icon={<Crown className="w-4 h-4" />} 
                       title="Unlock Premium CRM (Remove Blur)" 
@@ -251,7 +258,7 @@ export default function SuperAdminDashboard() {
                   <div className="grid grid-cols-1 gap-3">
                     {/* STARTER */}
                     <PlanCard 
-                      id="starter" currentPlan={selectedStore.plan_tier} isLoading={updatingId === `${selectedStore.id}-plan`} onSelect={() => handlePlanUpdate(selectedStore.id, 'starter')}
+                      id="starter" currentPlan={selectedStore.plan_tier || 'starter'} isLoading={updatingId === `${selectedStore.id}-plan`} onSelect={() => handlePlanUpdate(selectedStore.id, 'starter')}
                       title="Starter" price="₹1,999/mo" 
                       features={['QR Billing + POS', 'Basic Reports', '1 Store Limit']} 
                       color="border-zinc-500" icon={<Store className="w-5 h-5 text-zinc-400" />}
@@ -396,7 +403,6 @@ function FeatureToggle({ icon, title, isActive, isLoading, onToggle, themeColor 
   );
 }
 
-// THE NEW SUBSCRIPTION PLAN CARD
 function PlanCard({ id, currentPlan, isLoading, onSelect, title, price, features, color, glow, badge, icon }: any) {
   const isActive = currentPlan === id;
   
@@ -405,7 +411,6 @@ function PlanCard({ id, currentPlan, isLoading, onSelect, title, price, features
       onClick={onSelect}
       className={`relative p-5 rounded-2xl border-2 transition-all cursor-pointer overflow-hidden ${isActive ? `bg-[#111] ${color}` : 'bg-[#0a0a0a] border-white/5 hover:border-white/20'}`}
     >
-      {/* Background Glow for active/highlighted plans */}
       {glow && isActive && <div className="absolute top-0 right-0 w-32 h-32 blur-[40px] opacity-20 pointer-events-none" style={{ backgroundColor: glow.replace('0.1)', '1)') }} />}
       
       <div className="flex justify-between items-start relative z-10">
@@ -422,7 +427,6 @@ function PlanCard({ id, currentPlan, isLoading, onSelect, title, price, features
           </div>
         </div>
         
-        {/* Selection Indicator */}
         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${isActive ? `${color} bg-white/10` : 'border-zinc-700 bg-black'}`}>
           {isLoading ? <Loader2 className="w-3 h-3 animate-spin text-zinc-500" /> : (isActive && <div className={`w-2.5 h-2.5 rounded-full ${color.replace('border-', 'bg-')}`} />)}
         </div>
