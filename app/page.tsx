@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { toggleStoreFeature } from './actions/agencyActions';
+import { toggleStoreFeature } from './actions/agencyActions'; // Ensure this can handle string updates too if needed for plans
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShieldAlert, Store, Zap, Search, Loader2, 
-  Receipt, Radar, TrendingUp, Bell, AlertTriangle, Check, X, Activity
+  Receipt, Radar, TrendingUp, Bell, AlertTriangle, 
+  Check, X, Activity, Crown, Star, MessageCircle, Sparkles, CheckCircle2
 } from 'lucide-react';
 
 export default function SuperAdminDashboard() {
@@ -24,7 +25,6 @@ export default function SuperAdminDashboard() {
   useEffect(() => {
     fetchNetworkData();
 
-    // Real-time WebSocket Listener for AI Alerts
     const alertSubscription = supabase
       .channel('system-alerts-channel')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_alerts' }, payload => {
@@ -56,6 +56,7 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  // Handles boolean toggles (like removing the blur)
   const handleToggle = async (storeId: string, featureColumn: string, currentValue: boolean) => {
     setUpdatingId(`${storeId}-${featureColumn}`);
     try {
@@ -73,31 +74,37 @@ export default function SuperAdminDashboard() {
     }
   };
 
-    const handleAlertAction = async (alertId: string, action: 'approved' | 'rejected') => {
+  // Handles String updates (like changing subscription plan)
+  const handlePlanUpdate = async (storeId: string, newPlan: string) => {
+    setUpdatingId(`${storeId}-plan`);
+    try {
+      // NOTE: You will need to ensure your backend action or direct supabase call supports updating the 'plan_tier' string column
+      const { error } = await supabase.from('stores').update({ plan_tier: newPlan }).eq('id', storeId);
+      if (error) throw error;
+      
+      setStores(stores.map(s => s.id === storeId ? { ...s, plan_tier: newPlan } : s));
+      if (selectedStore?.id === storeId) {
+        setSelectedStore({ ...selectedStore, plan_tier: newPlan });
+      }
+    } catch (err) {
+      console.error("Failed to update plan:", err);
+      alert("Plan update failed!");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleAlertAction = async (alertId: string, action: 'approved' | 'rejected') => {
     setUpdatingId(`alert-${alertId}`);
     try {
-      // 1. Pehle us alert ka data nikalte hain jisme product_id aur naya category chhipa hai
       const alertToProcess = alerts.find(a => a.id === alertId);
-
-      // 2. Agar aapne APPROVE kiya hai, toh asli database change yahan hoga!
       if (action === 'approved' && alertToProcess?.action_payload) {
         const { product_id, new_category } = alertToProcess.action_payload;
-        
-        // 🔥 MAGIC: Products table me category update ho rahi hai!
-        const { error: productError } = await supabase
-          .from('products')
-          .update({ category: new_category }) // 'Normal Apparel' se 'Leather Goods' ban gaya
-          .eq('id', product_id);
-          
+        const { error: productError } = await supabase.from('products').update({ category: new_category }).eq('id', product_id);
         if (productError) throw new Error(`Product update failed: ${productError.message}`);
       }
-
-      // 3. Alert ko 'approved' ya 'rejected' mark karke close kar do
       await supabase.from('system_alerts').update({ status: action }).eq('id', alertId);
-      
-      // 4. UI drawer se alert hata do
       setAlerts(alerts.filter(a => a.id !== alertId));
-      
     } catch (err) {
       console.error("Failed to execute alert action:", err);
       alert("❌ Database Update Failed!");
@@ -106,46 +113,28 @@ export default function SuperAdminDashboard() {
     }
   };
 
-
-  // 🔥 THE MANUAL OVERRIDE (Timeout-Proof & Crash-Proof)
   const triggerManualScan = async () => {
     setIsScanning(true);
     try {
-      // API me Override Key bhej rahe hain
       const res = await fetch('/api/ai-watcher?manual=true'); 
-      
-      // 🛡️ Agar Vercel ne 504 Timeout ya 500 error diya, toh crash hone se bachao
       if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Vercel/Backend Error:", errorText);
-        alert(`❌ Server Error (${res.status}): AI backend limit reached or API crashed. View console for details.`);
-        setIsScanning(false);
-        return;
+        alert(`❌ Server Error (${res.status})`);
+        setIsScanning(false); return;
       }
-
       const data = await res.json();
-      
-      if (data.status === 'healthy' || data.status === 'success') {
-        alert(`✅ System Report: ${data.message}`);
-      } else if (data.status === 'error') {
-        alert(`❌ Error: ${data.message}`);
-      }
+      if (data.status === 'healthy' || data.status === 'success') alert(`✅ System Report: ${data.message}`);
+      else if (data.status === 'error') alert(`❌ Error: ${data.message}`);
     } catch (error) {
       console.error("Manual scan crashed:", error);
-      alert("❌ Front-end Crash: Could not connect to backend or invalid JSON received.");
+      alert("❌ Front-end Crash");
     } finally {
       setIsScanning(false);
     }
   };
 
-
   const totalVolume = sales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
   const totalTransactions = sales.length;
-
-  const filteredStores = stores.filter(store => 
-    store.store_name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    store.slug?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredStores = stores.filter(store => store.store_name?.toLowerCase().includes(searchQuery.toLowerCase()) || store.slug?.toLowerCase().includes(searchQuery.toLowerCase()));
 
   if (loading) return <div className="min-h-screen bg-[#050505] flex items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-emerald-500" /></div>;
 
@@ -166,34 +155,16 @@ export default function SuperAdminDashboard() {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* 🔥 NEW MANUAL SCAN BUTTON */}
-            <button 
-              onClick={triggerManualScan}
-              disabled={isScanning}
-              className="group relative px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full hover:bg-emerald-500/20 transition-all flex items-center gap-2 disabled:opacity-50"
-            >
-              {isScanning ? (
-                <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
-              ) : (
-                <Activity className="w-4 h-4 text-emerald-400 group-hover:animate-pulse" />
-              )}
-              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
-                {isScanning ? 'Scanning...' : 'Manual Scan'}
-              </span>
+            <button onClick={triggerManualScan} disabled={isScanning} className="group relative px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full hover:bg-emerald-500/20 transition-all flex items-center gap-2 disabled:opacity-50">
+              {isScanning ? <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" /> : <Activity className="w-4 h-4 text-emerald-400 group-hover:animate-pulse" />}
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 hidden sm:block">{isScanning ? 'Scanning...' : 'Manual Scan'}</span>
             </button>
-
-            {/* AI Alert Bell Button */}
-            <button 
-              onClick={() => setIsAlertDrawerOpen(true)}
-              className="relative p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all flex items-center justify-center"
-            >
+            <button onClick={() => setIsAlertDrawerOpen(true)} className="relative p-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all flex items-center justify-center">
               <Bell className={`w-5 h-5 ${alerts.length > 0 ? 'text-rose-400 animate-pulse' : 'text-zinc-500'}`} />
               {alerts.length > 0 && (
                 <span className="absolute -top-1 -right-1 flex h-4 w-4">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-[#0A0A0A] text-[8px] font-black items-center justify-center text-white">
-                    {alerts.length}
-                  </span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 border-2 border-[#0A0A0A] text-[8px] font-black items-center justify-center text-white">{alerts.length}</span>
                 </span>
               )}
             </button>
@@ -202,14 +173,12 @@ export default function SuperAdminDashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Analytics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
           <StatCard icon={<Store className="w-5 h-5 text-blue-400" />} title="Active Tenants" value={`${stores.length} / 2000`} subtitle="Target for 2026" glowColor="rgba(96,165,250,0.1)" />
           <StatCard icon={<TrendingUp className="w-5 h-5 text-emerald-400" />} title="Network Volume" value={`₹${totalVolume.toLocaleString('en-IN')}`} subtitle="Total value processed" glowColor="rgba(16,185,129,0.1)" />
           <StatCard icon={<Radar className="w-5 h-5 text-purple-400" />} title="Global Scans" value={totalTransactions.toLocaleString('en-IN')} subtitle="Successful checkouts" glowColor="rgba(192,132,252,0.1)" />
         </div>
 
-        {/* Store Directory */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <h2 className="text-lg font-black tracking-tight">Tenant Directory</h2>
           <div className="relative w-full sm:w-72">
@@ -224,39 +193,120 @@ export default function SuperAdminDashboard() {
               <div className="flex items-center gap-4">
                 <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-xs font-black text-zinc-500 border border-white/5">#{index + 1}</div>
                 <div>
-                  <h3 className="text-sm font-black text-white">{store.store_name || 'Unnamed Store'}</h3>
-                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">/{store.slug}</p>
+                  <h3 className="text-sm font-black text-white flex items-center gap-2">
+                    {store.store_name || 'Unnamed Store'}
+                    {store.plan_tier === 'elite' && <Crown className="w-3 h-3 text-rose-500" />}
+                    {store.plan_tier === 'growth' && <Star className="w-3 h-3 text-amber-500" />}
+                  </h3>
+                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-0.5">/{store.slug} • {store.plan_tier || 'STARTER'}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedStore(store)} className="bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest py-2 px-4 rounded-full transition-all flex gap-2"><Zap className="w-3 h-3 text-emerald-400" /> VIP Controls</button>
+              <button onClick={() => setSelectedStore(store)} className="bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase tracking-widest py-2 px-4 rounded-full transition-all flex gap-2"><Zap className="w-3 h-3 text-emerald-400" /> CRM Setup</button>
             </div>
           ))}
         </div>
       </main>
 
-      {/* 🚀 THE VIP CONTROLS DRAWER */}
+      {/* 🚀 THE HIGH-END CRM & VIP CONTROLS DRAWER */}
       <AnimatePresence>
         {selectedStore && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedStore(null)} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed top-0 right-0 h-full w-full sm:w-[400px] bg-[#0A0A0A] border-l border-white/10 z-50 p-6 shadow-2xl overflow-y-auto">
-              <div className="flex items-center justify-between mb-8">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedStore(null)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" />
+            
+            <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }} className="fixed top-0 right-0 h-full w-full sm:w-[500px] bg-[#0A0A0A] border-l border-white/10 z-50 shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-y-auto">
+              
+              {/* Drawer Header */}
+              <div className="sticky top-0 bg-[#0A0A0A]/90 backdrop-blur-xl border-b border-white/5 p-6 z-10 flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-black">{selectedStore.store_name}</h2>
-                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Tenant ID: {selectedStore.id.substring(0,8)}</p>
+                  <h2 className="text-2xl font-black text-white">{selectedStore.store_name}</h2>
+                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">Tenant Control Panel</p>
                 </div>
-                <button onClick={() => setSelectedStore(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10"><X className="w-5 h-5" /></button>
+                <button onClick={() => setSelectedStore(null)} className="p-2 bg-white/5 rounded-full hover:bg-white/10 transition-colors"><X className="w-5 h-5 text-zinc-400" /></button>
               </div>
-              <div className="flex flex-col gap-3">
-                <FeatureToggle icon={<Receipt className="w-4 h-4" />} title="Inclusive GST Engine" isActive={selectedStore.has_gst} isLoading={updatingId === `${selectedStore.id}-has_gst`} onToggle={() => handleToggle(selectedStore.id, 'has_gst', selectedStore.has_gst)} themeColor={selectedStore.theme_color} />
-                <FeatureToggle icon={<Radar className="w-4 h-4" />} title="Virtual CCTV (Radar)" isActive={selectedStore.has_live_radar} isLoading={updatingId === `${selectedStore.id}-has_live_radar`} onToggle={() => handleToggle(selectedStore.id, 'has_live_radar', selectedStore.has_live_radar)} themeColor={selectedStore.theme_color} />
+
+              <div className="p-6 flex flex-col gap-8">
+                
+                {/* 🟢 ACCESS CONTROLS (THE BLUR REMOVER) */}
+                <div>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-4">God Mode Controls</h3>
+                  <div className="flex flex-col gap-3">
+                    {/* 🔥 THE MASTER SWITCH TO REMOVE BLUR FROM STORE DASHBOARD */}
+                    <FeatureToggle 
+                      icon={<Crown className="w-4 h-4" />} 
+                      title="Unlock Premium CRM (Remove Blur)" 
+                      isActive={selectedStore.is_premium} 
+                      isLoading={updatingId === `${selectedStore.id}-is_premium`} 
+                      onToggle={() => handleToggle(selectedStore.id, 'is_premium', selectedStore.is_premium)} 
+                      themeColor="#10b981" 
+                    />
+                    <FeatureToggle icon={<Receipt className="w-4 h-4" />} title="Inclusive GST Engine" isActive={selectedStore.has_gst} isLoading={updatingId === `${selectedStore.id}-has_gst`} onToggle={() => handleToggle(selectedStore.id, 'has_gst', selectedStore.has_gst)} themeColor={selectedStore.theme_color} />
+                    <FeatureToggle icon={<Radar className="w-4 h-4" />} title="Virtual CCTV (Radar)" isActive={selectedStore.has_live_radar} isLoading={updatingId === `${selectedStore.id}-has_live_radar`} onToggle={() => handleToggle(selectedStore.id, 'has_live_radar', selectedStore.has_live_radar)} themeColor={selectedStore.theme_color} />
+                  </div>
+                </div>
+
+                {/* 💰 SUBSCRIPTION ENGINE */}
+                <div>
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-4">Subscription Engine</h3>
+                  
+                  <div className="grid grid-cols-1 gap-3">
+                    {/* STARTER */}
+                    <PlanCard 
+                      id="starter" currentPlan={selectedStore.plan_tier} isLoading={updatingId === `${selectedStore.id}-plan`} onSelect={() => handlePlanUpdate(selectedStore.id, 'starter')}
+                      title="Starter" price="₹1,999/mo" 
+                      features={['QR Billing + POS', 'Basic Reports', '1 Store Limit']} 
+                      color="border-zinc-500" icon={<Store className="w-5 h-5 text-zinc-400" />}
+                    />
+
+                    {/* GROWTH (MOST POPULAR) */}
+                    <PlanCard 
+                      id="growth" currentPlan={selectedStore.plan_tier} isLoading={updatingId === `${selectedStore.id}-plan`} onSelect={() => handlePlanUpdate(selectedStore.id, 'growth')}
+                      title="Growth" price="₹3,999/mo" badge="MOST POPULAR"
+                      features={['Everything in Starter', 'GST-ready billing', 'Basic CRM History']} 
+                      color="border-amber-500" glow="rgba(245,158,11,0.1)" icon={<Star className="w-5 h-5 text-amber-500" />}
+                    />
+
+                    {/* PRO */}
+                    <PlanCard 
+                      id="pro" currentPlan={selectedStore.plan_tier} isLoading={updatingId === `${selectedStore.id}-plan`} onSelect={() => handlePlanUpdate(selectedStore.id, 'pro')}
+                      title="Pro" price="₹5,999/mo" 
+                      features={['Everything in Growth', 'Advanced CRM (Unlocked)', '300 WhatsApp Msgs/mo']} 
+                      color="border-blue-500" icon={<TrendingUp className="w-5 h-5 text-blue-500" />}
+                    />
+
+                    {/* ELITE */}
+                    <PlanCard 
+                      id="elite" currentPlan={selectedStore.plan_tier} isLoading={updatingId === `${selectedStore.id}-plan`} onSelect={() => handlePlanUpdate(selectedStore.id, 'elite')}
+                      title="Elite" price="₹9,999/mo" badge="PREMIUM"
+                      features={['Everything in Pro', 'Social Media Marketing', 'Dedicated Support']} 
+                      color="border-rose-500" glow="rgba(244,63,94,0.1)" icon={<Sparkles className="w-5 h-5 text-rose-500" />}
+                    />
+                  </div>
+                </div>
+
+                {/* ➕ ADD-ONS */}
+                <div className="mb-10">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-4">Revenue Add-ons</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                     <div className="bg-[#111] border border-white/5 p-4 rounded-2xl flex flex-col items-center text-center justify-center cursor-pointer hover:border-white/20 transition-all">
+                       <Store className="w-5 h-5 text-zinc-400 mb-2" />
+                       <h4 className="text-xs font-black text-white">Extra Store</h4>
+                       <p className="text-[10px] font-bold text-zinc-500 mt-1">₹999/mo</p>
+                     </div>
+                     <div className="bg-[#111] border border-[#25D366]/20 p-4 rounded-2xl flex flex-col items-center text-center justify-center cursor-pointer hover:border-[#25D366]/50 transition-all">
+                       <MessageCircle className="w-5 h-5 text-[#25D366] mb-2" />
+                       <h4 className="text-xs font-black text-white">Dedicated WA</h4>
+                       <p className="text-[10px] font-bold text-zinc-500 mt-1">₹999/mo</p>
+                     </div>
+                  </div>
+                </div>
+
               </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
 
-      {/* ⚠️ AI SYSTEM ALERTS DRAWER */}
+      {/* ⚠️ AI SYSTEM ALERTS DRAWER (Existing Logic untouched) */}
       <AnimatePresence>
         {isAlertDrawerOpen && (
           <>
@@ -279,74 +329,43 @@ export default function SuperAdminDashboard() {
               <div className="flex flex-col gap-4">
                 {alerts.length === 0 ? (
                   <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
+                    initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
                     className="flex flex-col items-center justify-center py-16 text-zinc-500 border border-dashed border-white/10 rounded-2xl bg-white/[0.01]"
                   >
                     <ShieldAlert className="w-12 h-12 mb-4 opacity-20 text-emerald-500" />
                     <p className="text-sm font-black uppercase tracking-widest text-zinc-300">System is Healthy</p>
-                    <p className="text-xs mt-2 opacity-50 font-medium">No pending AI alerts or anomalies detected.</p>
+                    <p className="text-xs mt-2 opacity-50 font-medium">No pending AI alerts detected.</p>
                   </motion.div>
                 ) : (
-                                    <AnimatePresence>
+                  <AnimatePresence>
                     {alerts.map((alert) => (
-                      <motion.div 
-                        key={alert.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, x: -50 }}
-                        className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group mb-4"
-                      >
+                      <motion.div key={alert.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -50 }} className="bg-[#111] border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group mb-4">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 blur-[40px]" />
-                        
-                        {/* 🔥 THE FIX: 'message' hata kar 'title' aur 'description' lagaya */}
-                        <h3 className="text-base font-black text-white relative z-10">
-                          {alert.title || "⚠️ System Alert"}
-                        </h3>
-                        <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">
-                          {alert.description || "Checking details..."}
-                        </p>
-                        
-                        {/* Extra Detail: Suggested Fix dikhane ke liye */}
-                        {alert.action_payload?.suggested_fix && (
-                           <p className="text-xs text-emerald-400 mt-2 font-bold relative z-10">
-                             Fix: {alert.action_payload.suggested_fix}
-                           </p>
-                        )}
+                        <h3 className="text-base font-black text-white relative z-10">{alert.title || "⚠️ System Alert"}</h3>
+                        <p className="text-sm text-zinc-400 mt-2 font-medium leading-relaxed relative z-10">{alert.description || "Checking details..."}</p>
+                        {alert.action_payload?.suggested_fix && <p className="text-xs text-emerald-400 mt-2 font-bold relative z-10">Fix: {alert.action_payload.suggested_fix}</p>}
                         
                         <div className="flex items-center gap-3 mt-6 relative z-10">
-                          <button 
-                            onClick={() => handleAlertAction(alert.id, 'approved')}
-                            disabled={updatingId === `alert-${alert.id}`}
-                            className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-                          >
+                          <button onClick={() => handleAlertAction(alert.id, 'approved')} disabled={updatingId === `alert-${alert.id}`} className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2">
                             {updatingId === `alert-${alert.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Check className="w-4 h-4" /> Approve & Deploy</>}
                           </button>
-                          <button 
-                            onClick={() => handleAlertAction(alert.id, 'rejected')}
-                            disabled={updatingId === `alert-${alert.id}`}
-                            className="flex-1 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all"
-                          >
-                            Reject
-                          </button>
+                          <button onClick={() => handleAlertAction(alert.id, 'rejected')} disabled={updatingId === `alert-${alert.id}`} className="flex-1 bg-white/5 hover:bg-white/10 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all">Reject</button>
                         </div>
                       </motion.div>
                     ))}
                   </AnimatePresence>
-
                 )}
               </div>
-
             </motion.div>
           </>
         )}
       </AnimatePresence>
-
     </div>
   );
 }
 
-// Sub-components
+// --- SUB-COMPONENTS ---
+
 function StatCard({ icon, title, value, subtitle, glowColor }: any) {
   return (
     <div className="bg-[#0A0A0A] border border-white/5 p-6 rounded-[2rem] relative overflow-hidden group">
@@ -373,6 +392,50 @@ function FeatureToggle({ icon, title, isActive, isLoading, onToggle, themeColor 
           <div className={`w-4 h-4 bg-white rounded-full transition-transform ${isActive ? 'translate-x-4' : 'translate-x-0'}`} />
         </div>
       )}
+    </div>
+  );
+}
+
+// THE NEW SUBSCRIPTION PLAN CARD
+function PlanCard({ id, currentPlan, isLoading, onSelect, title, price, features, color, glow, badge, icon }: any) {
+  const isActive = currentPlan === id;
+  
+  return (
+    <div 
+      onClick={onSelect}
+      className={`relative p-5 rounded-2xl border-2 transition-all cursor-pointer overflow-hidden ${isActive ? `bg-[#111] ${color}` : 'bg-[#0a0a0a] border-white/5 hover:border-white/20'}`}
+    >
+      {/* Background Glow for active/highlighted plans */}
+      {glow && isActive && <div className="absolute top-0 right-0 w-32 h-32 blur-[40px] opacity-20 pointer-events-none" style={{ backgroundColor: glow.replace('0.1)', '1)') }} />}
+      
+      <div className="flex justify-between items-start relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-black/50 rounded-full border border-white/10 flex items-center justify-center">
+            {icon}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-lg font-black text-white">{title}</h4>
+              {badge && <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${isActive ? color : 'border-zinc-700 text-zinc-500'}`}>{badge}</span>}
+            </div>
+            <p className="text-sm font-black text-zinc-400 mt-0.5">{price}</p>
+          </div>
+        </div>
+        
+        {/* Selection Indicator */}
+        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${isActive ? `${color} bg-white/10` : 'border-zinc-700 bg-black'}`}>
+          {isLoading ? <Loader2 className="w-3 h-3 animate-spin text-zinc-500" /> : (isActive && <div className={`w-2.5 h-2.5 rounded-full ${color.replace('border-', 'bg-')}`} />)}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2 relative z-10 border-t border-white/5 pt-4">
+        {features.map((feat: string, idx: number) => (
+          <div key={idx} className="flex items-center gap-2">
+            <CheckCircle2 className={`w-3.5 h-3.5 ${isActive ? color.replace('border-', 'text-') : 'text-zinc-600'}`} />
+            <span className="text-xs font-bold text-zinc-400">{feat}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
